@@ -1,6 +1,6 @@
 /* Copyright (c) 2003, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -25,7 +25,7 @@
    * <winsock.h> and mess things up, in at least some openssl versions. */
   #include <winsock2.h>
   #include <ws2tcpip.h>
-#endif /* defined(_WIN32) */
+#endif
 
 #include "lib/crypt_ops/crypto_cipher.h"
 #include "lib/crypt_ops/crypto_rand.h"
@@ -37,7 +37,7 @@
 
 /* Some versions of OpenSSL declare SSL_get_selected_srtp_profile twice in
  * srtp.h. Suppress the GCC warning so we can build with -Wredundant-decl. */
-DISABLE_GCC_WARNING("-Wredundant-decls")
+DISABLE_GCC_WARNING(redundant-decls)
 
 #include <openssl/opensslv.h>
 
@@ -54,7 +54,7 @@ DISABLE_GCC_WARNING("-Wredundant-decls")
 #include <openssl/bn.h>
 #include <openssl/rsa.h>
 
-ENABLE_GCC_WARNING("-Wredundant-decls")
+ENABLE_GCC_WARNING(redundant-decls)
 
 #include "lib/tls/tortls.h"
 #include "lib/tls/tortls_st.h"
@@ -98,9 +98,6 @@ ENABLE_GCC_WARNING("-Wredundant-decls")
 #ifndef SSL3_FLAGS_ALLOW_UNSAFE_LEGACY_RENEGOTIATION
 #define SSL3_FLAGS_ALLOW_UNSAFE_LEGACY_RENEGOTIATION 0x0010
 #endif
-
-/** Set to true iff openssl bug 7712 has been detected. */
-static int openssl_bug_7712_is_present = 0;
 
 /** Return values for tor_tls_classify_client_ciphers.
  *
@@ -245,28 +242,8 @@ tls_log_errors(tor_tls_t *tls, int severity, int domain, const char *doing)
   unsigned long err;
 
   while ((err = ERR_get_error()) != 0) {
-    if (tls)
-      tls->last_error = err;
     tor_tls_log_one_error(tls, err, severity, domain, doing);
   }
-}
-
-/**
- * Return a string representing more detail about the last error received
- * on TLS.
- *
- * May return null if no error was found.
- **/
-const char *
-tor_tls_get_last_error_msg(const tor_tls_t *tls)
-{
-  IF_BUG_ONCE(!tls) {
-    return NULL;
-  }
-  if (tls->last_error == 0) {
-    return NULL;
-  }
-  return (const char*)ERR_reason_error_string(tls->last_error);
 }
 
 #define CATCH_SYSCALL 1
@@ -338,11 +315,11 @@ tor_tls_init(void)
 #else
     SSL_library_init();
     SSL_load_error_strings();
-#endif /* defined(OPENSSL_1_1_API) */
+#endif
 
 #if (SIZEOF_VOID_P >= 8 &&                              \
      OPENSSL_VERSION_NUMBER >= OPENSSL_V_SERIES(1,0,1))
-    long version = tor_OpenSSL_version_num();
+    long version = OpenSSL_version_num();
 
     /* LCOV_EXCL_START : we can't test these lines on the same machine */
     if (version >= OPENSSL_V_SERIES(1,0,1)) {
@@ -403,7 +380,7 @@ static const char SERVER_CIPHER_LIST[] =
    * conclude that it has no valid ciphers if it's running with TLS1.3.
    */
   TLS1_3_TXT_AES_128_GCM_SHA256 ":"
-#endif /* defined(TLS1_3_TXT_AES_128_GCM_SHA256) */
+#endif
   TLS1_TXT_DHE_RSA_WITH_AES_256_SHA ":"
   TLS1_TXT_DHE_RSA_WITH_AES_128_SHA;
 
@@ -484,9 +461,7 @@ static const char UNRESTRICTED_SERVER_CIPHER_LIST[] =
 /** List of ciphers that clients should advertise, omitting items that
  * our OpenSSL doesn't know about. */
 static const char CLIENT_CIPHER_LIST[] =
-#ifndef COCCI
-#include "lib/tls/ciphers.inc"
-#endif
+#include "ciphers.inc"
   /* Tell it not to use SSLv2 ciphers, so that it can select an SSLv3 version
    * of any cipher we say. */
   "!SSLv2"
@@ -664,22 +639,6 @@ tor_tls_context_new(crypto_pk_t *identity, unsigned int key_lifetime,
     SSL_CTX_set_tmp_dh(result->ctx, dh);
     DH_free(dh);
   }
-/* We check for this function in two ways, since it might be either a symbol
- * or a macro. */
-#if defined(SSL_CTX_set1_groups_list) || defined(HAVE_SSL_CTX_SET1_GROUPS_LIST)
-  {
-    const char *list;
-    if (flags & TOR_TLS_CTX_USE_ECDHE_P224)
-      list = "P-224:P-256";
-    else if (flags & TOR_TLS_CTX_USE_ECDHE_P256)
-      list = "P-256:P-224";
-    else
-      list = "P-256:P-224";
-    int r = (int) SSL_CTX_set1_groups_list(result->ctx, list);
-    if (r < 0)
-      goto error;
-  }
-#else /* !(defined(SSL_CTX_set1_groups_list) || defined(HAVE_SSL_CTX_SE...)) */
   if (! is_client) {
     int nid;
     EC_KEY *ec_key;
@@ -695,7 +654,6 @@ tor_tls_context_new(crypto_pk_t *identity, unsigned int key_lifetime,
       SSL_CTX_set_tmp_ecdh(result->ctx, ec_key);
     EC_KEY_free(ec_key);
   }
-#endif /* defined(SSL_CTX_set1_groups_list) || defined(HAVE_SSL_CTX_SET1...) */
   SSL_CTX_set_verify(result->ctx, SSL_VERIFY_PEER,
                      always_accept_verify_cb);
   /* let us realloc bufs that we're writing from */
@@ -786,7 +744,7 @@ find_cipher_by_id(const SSL *ssl, const SSL_METHOD *m, uint16_t cipher)
       tor_assert((SSL_CIPHER_get_id(c) & 0xffff) == cipher);
     return c != NULL;
   }
-#else /* !defined(HAVE_SSL_CIPHER_FIND) */
+#else /* !(defined(HAVE_SSL_CIPHER_FIND)) */
 
 # if defined(HAVE_STRUCT_SSL_METHOD_ST_GET_CIPHER_BY_CHAR)
   if (m && m->get_cipher_by_char) {
@@ -927,7 +885,7 @@ tor_tls_classify_client_ciphers(const SSL *ssl,
     smartlist_free(elts);
   }
  done:
-  if (tor_tls && peer_ciphers)
+  if (tor_tls)
     return tor_tls->client_cipher_list_type = res;
 
   return res;
@@ -1078,13 +1036,6 @@ tor_tls_new(tor_socket_t sock, int isServer)
     tor_free(fake_hostname);
   }
 #endif /* defined(SSL_set_tlsext_host_name) */
-
-#ifdef SSL_CTRL_SET_MAX_PROTO_VERSION
-  if (openssl_bug_7712_is_present) {
-    /* We can't actually use TLS 1.3 until this bug is fixed. */
-    SSL_set_max_proto_version(result->ssl, TLS1_2_VERSION);
-  }
-#endif /* defined(SSL_CTRL_SET_MAX_PROTO_VERSION) */
 
   if (!SSL_set_cipher_list(result->ssl,
                      isServer ? SERVER_CIPHER_LIST : CLIENT_CIPHER_LIST)) {
@@ -1703,8 +1654,7 @@ tor_tls_get_tlssecrets,(tor_tls_t *tls, uint8_t *secrets_out))
  * provided <b>context</b> (<b>context_len</b> bytes long) and
  * <b>label</b> (a NUL-terminated string), compute a 32-byte secret in
  * <b>secrets_out</b> that only the parties to this TLS session can
- * compute.  Return 0 on success; -1 on failure; and -2 on failure
- * caused by OpenSSL bug 7712.
+ * compute.  Return 0 on success and -1 on failure.
  */
 MOCK_IMPL(int,
 tor_tls_export_key_material,(tor_tls_t *tls, uint8_t *secrets_out,
@@ -1719,39 +1669,6 @@ tor_tls_export_key_material,(tor_tls_t *tls, uint8_t *secrets_out,
                                      secrets_out, DIGEST256_LEN,
                                      label, strlen(label),
                                      context, context_len, 1);
-
-  if (r != 1) {
-    int severity = openssl_bug_7712_is_present ? LOG_WARN : LOG_DEBUG;
-    tls_log_errors(tls, severity, LD_NET, "exporting keying material");
-  }
-
-#ifdef TLS1_3_VERSION
-  if (r != 1 &&
-      strlen(label) > 12 &&
-      SSL_version(tls->ssl) >= TLS1_3_VERSION) {
-
-    if (! openssl_bug_7712_is_present) {
-      /* We might have run into OpenSSL issue 7712, which caused OpenSSL
-       * 1.1.1a to not handle long labels.  Let's test to see if we have.
-       */
-      r = SSL_export_keying_material(tls->ssl, secrets_out, DIGEST256_LEN,
-                                     "short", 5, context, context_len, 1);
-      if (r == 1) {
-        /* A short label succeeds, but a long label fails. This was openssl
-         * issue 7712. */
-        openssl_bug_7712_is_present = 1;
-        log_warn(LD_GENERAL, "Detected OpenSSL bug 7712: disabling TLS 1.3 on "
-                 "future connections. A fix is expected to appear in OpenSSL "
-                 "1.1.1b.");
-      }
-    }
-    if (openssl_bug_7712_is_present)
-      return -2;
-    else
-      return -1;
-  }
-#endif /* defined(TLS1_3_VERSION) */
-
   return (r == 1) ? 0 : -1;
 }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright 2014-2019, The Tor Project, Inc
+# Copyright 2014-2018, The Tor Project, Inc
 # See LICENSE for licensing information
 
 """
@@ -7,11 +7,6 @@
 
    Includes self-tester and test vector generator.
 """
-
-# Future imports for Python 2.7, mandatory in 3.0
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import slow_ed25519
 from slow_ed25519 import *
@@ -53,7 +48,7 @@ def blindPK(pk, param):
 def expandSK(sk):
     h = H(sk)
     a = 2**(b-2) + sum(2**i * bit(h,i) for i in range(3,b-2))
-    k = bytes(h[i] for i in range(b//8,b//4))
+    k = ''.join([h[i] for i in range(b/8,b/4)])
     assert len(k) == 32
     return encodeint(a)+k
 
@@ -64,7 +59,7 @@ def publickeyFromESK(h):
 
 def signatureWithESK(m,h,pk):
     a = decodeint(h[:32])
-    r = Hint(bytes([h[i] for i in range(b//8,b//4)]) + m)
+    r = Hint(''.join([h[i] for i in range(b/8,b/4)]) + m)
     R = scalarmult(B,r)
     S = (r + Hint(encodepoint(R) + pk + m) * a) % l
     return encodepoint(R) + encodeint(S)
@@ -152,7 +147,7 @@ class SelfTest(unittest.TestCase):
         # Check that identities match
         assert(identity == identity2)
         # Check that identity is the point (0,1)
-        assert(identity == [0,1])
+        assert(identity == [0L,1L])
 
         # Check identity element: a*E = E, where a is a random scalar
         scalar = random_scalar(os.urandom)
@@ -186,22 +181,22 @@ BLINDING_PARAMS = [
 PREFIX = "ED25519_"
 
 def writeArray(name, array):
-    print("static const char *{prefix}{name}[] = {{".format(
-        prefix=PREFIX,name=name))
+    print "static const char *{prefix}{name}[] = {{".format(
+        prefix=PREFIX,name=name)
     for a in array:
         h = binascii.b2a_hex(a)
         if len(h) > 70:
             h1 = h[:70]
             h2 = h[70:]
-            print('  "{0}"\n      "{1}",'.format(h1,h2))
+            print '  "{0}"\n      "{1}",'.format(h1,h2)
         else:
-            print('  "{0}",'.format(h))
-    print("};\n")
+            print '  "{0}",'.format(h)
+    print "};\n"
 
 def comment(text, initial="/**"):
-    print(initial)
-    print(textwrap.fill(text,initial_indent=" * ",subsequent_indent=" * "))
-    print(" */")
+    print initial
+    print textwrap.fill(text,initial_indent=" * ",subsequent_indent=" * ")
+    print " */"
 
 def makeTestVectors():
     comment("""Test vectors for our ed25519 implementation and related
@@ -257,9 +252,11 @@ def makeTestVectors():
 if __name__ == '__main__':
     import sys
     if len(sys.argv) == 1 or sys.argv[1] not in ("SelfTest", "MakeVectors"):
-        print("You should specify one of 'SelfTest' or 'MakeVectors'")
+        print "You should specify one of 'SelfTest' or 'MakeVectors'"
         sys.exit(1)
     if sys.argv[1] == 'SelfTest':
         unittest.main()
     else:
         makeTestVectors()
+
+

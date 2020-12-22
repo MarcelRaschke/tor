@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 #   This software has been dedicated to the public domain under the CC0
 #   public domain dedication.
@@ -9,7 +9,7 @@
 #
 #   You should have received a copy of the CC0 legalcode along with this
 #   work in doc/cc0.txt.  If not, see
-#      <https://creativecommons.org/publicdomain/zero/1.0/>.
+#      <http://creativecommons.org/publicdomain/zero/1.0/>.
 
 #  Nick Mathewson is responsible for this kludge, but takes no
 #  responsibility for it.
@@ -27,11 +27,6 @@
    This isn't so much tested.  When it breaks, you get to keep both
    pieces.
 """
-
-# Future imports for Python 2.7, mandatory in 3.0
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import struct
 import bisect

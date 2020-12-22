@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019, The Tor Project, Inc. */
+// Copyright (c) 2016-2018, The Tor Project, Inc. */
 // See LICENSE for licensing information */
 
 // Note that these functions are untested due to the fact that there are no
@@ -99,21 +99,21 @@ pub mod log {
     /// Domain log types. These mirror definitions in src/lib/log/log.h
     /// C_RUST_COUPLED: src/lib/log/log.c, log severity types
     extern "C" {
-        static LD_NET_: u64;
-        static LD_GENERAL_: u64;
+        static LD_NET_: u32;
+        static LD_GENERAL_: u32;
     }
 
-    /// Translate Rust definitions of log domain levels to C. This exposes a 1:1
+    /// Translate Rust defintions of log domain levels to C. This exposes a 1:1
     /// mapping between types.
     #[inline]
-    pub unsafe fn translate_domain(domain: LogDomain) -> u64 {
+    pub unsafe fn translate_domain(domain: LogDomain) -> u32 {
         match domain {
             LogDomain::Net => LD_NET_,
             LogDomain::General => LD_GENERAL_,
         }
     }
 
-    /// Translate Rust definitions of log severity levels to C. This exposes a
+    /// Translate Rust defintions of log severity levels to C. This exposes a
     /// 1:1 mapping between types.
     #[inline]
     pub unsafe fn translate_severity(severity: LogSeverity) -> c_int {
@@ -128,7 +128,7 @@ pub mod log {
     extern "C" {
         pub fn tor_log_string(
             severity: c_int,
-            domain: u64,
+            domain: u32,
             function: *const c_char,
             string: *const c_char,
         );

@@ -14,7 +14,7 @@
 			#define OS_OSX
 		#elif defined(macintosh) || defined(Macintosh)
 			#define OS_MAC
-		#elif defined(OpenBSD)
+		#elif defined(__OpenBSD__)
 			#define OS_OPENBSD
 		#endif
 	#endif

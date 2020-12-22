@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -86,7 +86,6 @@ tor_run_main(const tor_main_configuration_t *cfg)
 /* circumlocution to avoid getting warned about calling calloc instead of
  * tor_calloc. */
 #define real_calloc calloc
-#define real_free free
 
 static void
 child(const tor_main_configuration_t *cfg)
@@ -104,7 +103,6 @@ child(const tor_main_configuration_t *cfg)
   int rv = execv(BINDIR "/tor", args);
 
   if (rv < 0) {
-    real_free(args);
     exit(254);
   } else {
     abort(); /* Unreachable */

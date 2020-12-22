@@ -1,5 +1,5 @@
 /* Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -14,9 +14,8 @@
 #include "core/or/circuitbuild.h"
 #include "core/or/circuitlist.h"
 #include "core/or/circuituse.h"
-#include "core/or/extendinfo.h"
 #include "app/config/config.h"
-#include "feature/control/control_events.h"
+#include "feature/control/control.h"
 #include "lib/crypt_ops/crypto_rand.h"
 #include "lib/crypt_ops/crypto_util.h"
 #include "feature/hs/hs_client.h"
@@ -172,10 +171,9 @@ rend_compute_v2_desc_id(char *desc_id_out, const char *service_id,
   }
   /* Convert service ID to binary. */
   if (base32_decode(service_id_binary, REND_SERVICE_ID_LEN,
-                    service_id, REND_SERVICE_ID_LEN_BASE32) !=
-      REND_SERVICE_ID_LEN) {
+                    service_id, REND_SERVICE_ID_LEN_BASE32) < 0) {
     log_warn(LD_REND, "Could not compute v2 descriptor ID: "
-                      "Illegal characters or wrong length for service ID: %s",
+                      "Illegal characters in service ID: %s",
              safe_str_client(service_id));
     return -1;
   }
@@ -234,12 +232,7 @@ rend_encode_v2_intro_points(char **encoded, rend_service_descriptor_t *desc)
       goto done;
     }
     /* Assemble everything for this introduction point. */
-    const tor_addr_port_t *orport = extend_info_get_orport(info, AF_INET);
-    IF_BUG_ONCE(!orport) {
-      /* There must be an IPv4 address for v2 hs. */
-      goto done;
-    }
-    address = tor_addr_to_str_dup(&orport->addr);
+    address = tor_addr_to_str_dup(&info->addr);
     res = tor_snprintf(unenc + unenc_written, unenc_len - unenc_written,
                          "introduction-point %s\n"
                          "ip-address %s\n"
@@ -248,7 +241,7 @@ rend_encode_v2_intro_points(char **encoded, rend_service_descriptor_t *desc)
                          "service-key\n%s",
                        id_base32,
                        address,
-                       orport->port,
+                       info->port,
                        onion_key,
                        service_key);
     tor_free(address);
@@ -792,39 +785,39 @@ rend_process_relay_cell(circuit_t *circ, const crypt_path_t *layer_hint,
   switch (command) {
     case RELAY_COMMAND_ESTABLISH_INTRO:
       if (or_circ)
-        r = hs_intro_received_establish_intro(or_circ, payload, length);
+        r = hs_intro_received_establish_intro(or_circ,payload,length);
       break;
     case RELAY_COMMAND_ESTABLISH_RENDEZVOUS:
       if (or_circ)
-        r = rend_mid_establish_rendezvous(or_circ, payload, length);
+        r = rend_mid_establish_rendezvous(or_circ,payload,length);
       break;
     case RELAY_COMMAND_INTRODUCE1:
       if (or_circ)
-        r = hs_intro_received_introduce1(or_circ, payload, length);
+        r = hs_intro_received_introduce1(or_circ,payload,length);
       break;
     case RELAY_COMMAND_INTRODUCE2:
       if (origin_circ)
-        r = hs_service_receive_introduce2(origin_circ, payload, length);
+        r = hs_service_receive_introduce2(origin_circ,payload,length);
       break;
     case RELAY_COMMAND_INTRODUCE_ACK:
       if (origin_circ)
-        r = hs_client_receive_introduce_ack(origin_circ, payload, length);
+        r = hs_client_receive_introduce_ack(origin_circ,payload,length);
       break;
     case RELAY_COMMAND_RENDEZVOUS1:
       if (or_circ)
-        r = rend_mid_rendezvous(or_circ, payload, length);
+        r = rend_mid_rendezvous(or_circ,payload,length);
       break;
     case RELAY_COMMAND_RENDEZVOUS2:
       if (origin_circ)
-        r = hs_client_receive_rendezvous2(origin_circ, payload, length);
+        r = hs_client_receive_rendezvous2(origin_circ,payload,length);
       break;
     case RELAY_COMMAND_INTRO_ESTABLISHED:
       if (origin_circ)
-        r = hs_service_receive_intro_established(origin_circ, payload, length);
+        r = hs_service_receive_intro_established(origin_circ,payload,length);
       break;
     case RELAY_COMMAND_RENDEZVOUS_ESTABLISHED:
       if (origin_circ)
-        r = hs_client_receive_rendezvous_acked(origin_circ, payload, length);
+        r = hs_client_receive_rendezvous_acked(origin_circ,payload,length);
       break;
     default:
       tor_fragile_assert();

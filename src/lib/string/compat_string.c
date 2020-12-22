@@ -1,6 +1,6 @@
 /* Copyright (c) 2003-2004, Roger Dingledine
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -14,10 +14,10 @@
 
 /* Inline the strl functions if the platform doesn't have them. */
 #ifndef HAVE_STRLCPY
-#include "ext/strlcpy.c"
+#include "strlcpy.c"
 #endif
 #ifndef HAVE_STRLCAT
-#include "ext/strlcat.c"
+#include "strlcat.c"
 #endif
 
 #include <stdlib.h>

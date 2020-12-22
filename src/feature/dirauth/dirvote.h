@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -49,21 +49,35 @@
 #define MIN_VOTE_INTERVAL_TESTING_INITIAL \
                 ((MIN_VOTE_SECONDS_TESTING)+(MIN_DIST_SECONDS_TESTING)+1)
 
+/* A placeholder for routerstatus_format_entry() when the consensus method
+ * argument is not applicable. */
+#define ROUTERSTATUS_FORMAT_NO_CONSENSUS_METHOD 0
+
 /** The lowest consensus method that we currently support. */
-#define MIN_SUPPORTED_CONSENSUS_METHOD 28
+#define MIN_SUPPORTED_CONSENSUS_METHOD 25
 
 /** The highest consensus method that we currently support. */
-#define MAX_SUPPORTED_CONSENSUS_METHOD 30
+#define MAX_SUPPORTED_CONSENSUS_METHOD 28
 
-/**
- * Lowest consensus method where microdescriptor lines are put in canonical
- * form for improved compressibility and ease of storage. See proposal 298.
- **/
-#define MIN_METHOD_FOR_CANONICAL_FAMILIES_IN_MICRODESCS 29
+/** Lowest consensus method where authorities vote on required/recommended
+ * protocols. */
+#define MIN_METHOD_FOR_RECOMMENDED_PROTOCOLS 25
 
-/** Lowest consensus method where an unpadded base64 onion-key-ntor is allowed
- * See #7869 */
-#define MIN_METHOD_FOR_UNPADDED_NTOR_KEY 30
+/** Lowest consensus method where authorities add protocols to routerstatus
+ * entries. */
+#define MIN_METHOD_FOR_RS_PROTOCOLS 25
+
+/** Lowest consensus method where authorities initialize bandwidth weights to 1
+ * instead of 0. See #14881 */
+#define MIN_METHOD_FOR_INIT_BW_WEIGHTS_ONE 26
+
+/** Lowest consensus method where the microdesc consensus contains relay IPv6
+ * addresses. See #23826 and #20916. */
+#define MIN_METHOD_FOR_A_LINES_IN_MICRODESC_CONSENSUS 27
+
+/** Lowest consensus method where microdescriptors do not contain relay IPv6
+ * addresses. See #23828 and #20916. */
+#define MIN_METHOD_FOR_NO_A_LINES_IN_MICRODESC 28
 
 /** Default bandwidth to clip unmeasured bandwidths to using method >=
  * MIN_METHOD_TO_CLIP_UNMEASURED_BW.  (This is not a consensus method; do not
@@ -77,9 +91,6 @@
 
 /** Maximum size of a line in a vote. */
 #define MAX_BW_FILE_HEADERS_LINE_LEN 1024
-
-extern const char DIRVOTE_UNIVERSAL_FLAGS[];
-extern const char DIRVOTE_OPTIONAL_FLAGS[];
 
 /*
  * Public API. Used outside of the dirauth subsystem.
@@ -98,7 +109,6 @@ void dirvote_dirreq_get_status_vote(const char *url, smartlist_t *items,
 
 /* Storing signatures and votes functions */
 struct pending_vote_t * dirvote_add_vote(const char *vote_body,
-                                         time_t time_posted,
                                          const char **msg_out,
                                          int *status_out);
 int dirvote_add_signatures(const char *detached_signatures_body,
@@ -109,7 +119,7 @@ struct config_line_t;
 char *format_recommended_version_list(const struct config_line_t *line,
                                       int warn);
 
-#else /* !defined(HAVE_MODULE_DIRAUTH) */
+#else /* HAVE_MODULE_DIRAUTH */
 
 static inline time_t
 dirvote_act(const or_options_t *options, time_t now)
@@ -147,13 +157,9 @@ dirvote_dirreq_get_status_vote(const char *url, smartlist_t *items,
 }
 
 static inline struct pending_vote_t *
-dirvote_add_vote(const char *vote_body,
-                 time_t time_posted,
-                 const char **msg_out,
-                 int *status_out)
+dirvote_add_vote(const char *vote_body, const char **msg_out, int *status_out)
 {
   (void) vote_body;
-  (void) time_posted;
   /* If the dirauth module is disabled, this should NEVER be called else we
    * failed to safeguard the dirauth module. */
   tor_assert_nonfatal_unreached();
@@ -171,20 +177,18 @@ dirvote_add_signatures(const char *detached_signatures_body,
 {
   (void) detached_signatures_body;
   (void) source;
-  *msg_out = "No directory authority support";
+  (void) msg_out;
   /* If the dirauth module is disabled, this should NEVER be called else we
    * failed to safeguard the dirauth module. */
   tor_assert_nonfatal_unreached();
   return 0;
 }
 
-#endif /* defined(HAVE_MODULE_DIRAUTH) */
+#endif /* HAVE_MODULE_DIRAUTH */
 
 /* Item access */
 MOCK_DECL(const char*, dirvote_get_pending_consensus,
           (consensus_flavor_t flav));
-MOCK_DECL(uint32_t,dirserv_get_bandwidth_for_router_kb,
-        (const routerinfo_t *ri));
 MOCK_DECL(const char*, dirvote_get_pending_detached_signatures, (void));
 const cached_dir_t *dirvote_get_vote(const char *fp, int flags);
 
@@ -236,84 +240,10 @@ int networkstatus_add_detached_signatures(networkstatus_t *target,
                                           const char *source,
                                           int severity,
                                           const char **msg_out);
-STATIC int
-compare_routerinfo_usefulness(const routerinfo_t *first,
-                              const routerinfo_t *second);
-STATIC
-int compare_routerinfo_by_ipv4(const void **a, const void **b);
-
-STATIC
-int compare_routerinfo_by_ipv6(const void **a, const void **b);
-
-STATIC
-digestmap_t * get_sybil_list_by_ip_version(
-    const smartlist_t *routers, sa_family_t family);
-
-STATIC
-digestmap_t * get_all_possible_sybil(const smartlist_t *routers);
-
 STATIC
 char *networkstatus_get_detached_signatures(smartlist_t *consensuses);
 STATIC microdesc_t *dirvote_create_microdescriptor(const routerinfo_t *ri,
                                                    int consensus_method);
-
-/** The recommended relay protocols for this authority's votes.
- * Recommending a new protocol causes old tor versions to log a warning.
- */
-#define DIRVOTE_RECOMMEND_RELAY_PROTO           \
-  "Cons=2 "                                     \
-  "Desc=2 "                                     \
-  "DirCache=2 "                                 \
-  "HSDir=2 "                                    \
-  "HSIntro=4 "                                  \
-  "HSRend=2 "                                   \
-  "Link=4-5 "                                   \
-  "LinkAuth=3 "                                 \
-  "Microdesc=2 "                                \
-  "Relay=2"
-
-/** The recommended client protocols for this authority's votes.
- * Recommending a new protocol causes old tor versions to log a warning.
- */
-#define DIRVOTE_RECOMMEND_CLIENT_PROTO          \
-  "Cons=2 "                                     \
-  "Desc=2 "                                     \
-  "DirCache=2 "                                 \
-  "HSDir=2 "                                    \
-  "HSIntro=4 "                                  \
-  "HSRend=2 "                                   \
-  "Link=4-5 "                                   \
-  "Microdesc=2 "                                \
-  "Relay=2"
-
-/** The required relay protocols for this authority's votes.
- * WARNING: Requiring a new protocol causes old tor versions to shut down.
- *          Requiring the wrong protocols can break the tor network.
- * See Proposal 303: When and how to remove support for protocol versions.
- */
-#define DIRVOTE_REQUIRE_RELAY_PROTO             \
-  "Cons=2 "                                     \
-  "Desc=2 "                                     \
-  "DirCache=2 "                                 \
-  "HSDir=2 "                                    \
-  "HSIntro=4 "                                  \
-  "HSRend=2 "                                   \
-  "Link=4-5 "                                   \
-  "LinkAuth=3 "                                 \
-  "Microdesc=2 "                                \
-  "Relay=2"
-
-/** The required relay protocols for this authority's votes.
- * WARNING: Requiring a new protocol causes old tor versions to shut down.
- *          Requiring the wrong protocols can break the tor network.
- * See Proposal 303: When and how to remove support for protocol versions.
- */
-#define DIRVOTE_REQUIRE_CLIENT_PROTO            \
-  "Cons=2 "                                     \
-  "Desc=2 "                                     \
-  "Link=4 "                                     \
-  "Microdesc=2 "                                \
-  "Relay=2"
 
 #endif /* defined(DIRVOTE_PRIVATE) */
 

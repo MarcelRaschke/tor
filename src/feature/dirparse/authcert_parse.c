@@ -1,13 +1,8 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
-
-/**
- * @file authcert_parse.c
- * @brief Authority certificate parsing.
- **/
 
 #include "core/or/or.h"
 #include "feature/dirparse/authcert_parse.h"
@@ -18,22 +13,18 @@
 #include "lib/memarea/memarea.h"
 
 #include "feature/nodelist/authority_cert_st.h"
-#include "feature/dirparse/authcert_members.h"
 
 /** List of tokens recognized in V3 authority certificates. */
-// clang-format off
 static token_rule_t dir_key_certificate_table[] = {
-  AUTHCERT_MEMBERS,
+#include "feature/dirparse/authcert_members.i"
   T1("fingerprint",      K_FINGERPRINT,              CONCAT_ARGS, NO_OBJ ),
   END_OF_TABLE
 };
-// clang-format on
 
 /** Parse a key certificate from <b>s</b>; point <b>end-of-string</b> to
  * the first character after the certificate. */
 authority_cert_t *
-authority_cert_parse_from_string(const char *s, size_t maxlen,
-                                 const char **end_of_string)
+authority_cert_parse_from_string(const char *s, const char **end_of_string)
 {
   /** Reject any certificate at least this big; it is probably an overflow, an
    * attack, a bug, or some other nonsense. */
@@ -44,25 +35,24 @@ authority_cert_parse_from_string(const char *s, size_t maxlen,
   char digest[DIGEST_LEN];
   directory_token_t *tok;
   char fp_declared[DIGEST_LEN];
-  const char *eos;
+  char *eos;
   size_t len;
   int found;
   memarea_t *area = NULL;
-  const char *end_of_s = s + maxlen;
   const char *s_dup = s;
 
-  s = eat_whitespace_eos(s, end_of_s);
-  eos = tor_memstr(s, end_of_s - s, "\ndir-key-certification");
+  s = eat_whitespace(s);
+  eos = strstr(s, "\ndir-key-certification");
   if (! eos) {
     log_warn(LD_DIR, "No signature found on key certificate");
     return NULL;
   }
-  eos = tor_memstr(eos, end_of_s - eos, "\n-----END SIGNATURE-----\n");
+  eos = strstr(eos, "\n-----END SIGNATURE-----\n");
   if (! eos) {
     log_warn(LD_DIR, "No end-of-signature found on key certificate");
     return NULL;
   }
-  eos = memchr(eos+2, '\n', end_of_s - (eos+2));
+  eos = strchr(eos+2, '\n');
   tor_assert(eos);
   ++eos;
   len = eos - s;
@@ -79,7 +69,7 @@ authority_cert_parse_from_string(const char *s, size_t maxlen,
     log_warn(LD_DIR, "Error tokenizing key certificate");
     goto err;
   }
-  if (router_get_hash_impl(s, eos - s, digest, "dir-key-certificate-version",
+  if (router_get_hash_impl(s, strlen(s), digest, "dir-key-certificate-version",
                            "\ndir-key-certification", '\n', DIGEST_SHA1) < 0)
     goto err;
   tok = smartlist_get(tokens, 0);
@@ -130,13 +120,13 @@ authority_cert_parse_from_string(const char *s, size_t maxlen,
     tor_assert(tok->n_args);
     /* XXX++ use some tor_addr parse function below instead. -RD */
     if (tor_addr_port_split(LOG_WARN, tok->args[0], &address,
-                            &cert->ipv4_dirport) < 0 ||
+                            &cert->dir_port) < 0 ||
         tor_inet_aton(address, &in) == 0) {
       log_warn(LD_DIR, "Couldn't parse dir-address in certificate");
       tor_free(address);
       goto err;
     }
-    tor_addr_from_in(&cert->ipv4_addr, &in);
+    cert->addr = ntohl(in.s_addr);
     tor_free(address);
   }
 

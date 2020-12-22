@@ -1,5 +1,5 @@
 /* Copyright (c) 2014, Daniel Martí
- * Copyright (c) 2014-2020, The Tor Project, Inc. */
+ * Copyright (c) 2014-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #define CONSDIFF_PRIVATE
@@ -13,39 +13,6 @@
 
 #define tt_str_eq_line(a,b) \
   tt_assert(line_str_eq((b),(a)))
-
-static int
-consensus_split_lines_(smartlist_t *out, const char *s, memarea_t *area)
-{
-  size_t len = strlen(s);
-  return consensus_split_lines(out, s, len, area);
-}
-
-static int
-consensus_compute_digest_(const char *cons,
-                          consensus_digest_t *digest_out)
-{
-  size_t len = strlen(cons);
-  char *tmp = tor_memdup(cons, len);
-  // We use memdup here to ensure that the input is NOT nul-terminated.
-  // This makes it likelier for us to spot bugs.
-  int r = consensus_compute_digest(tmp, len, digest_out);
-  tor_free(tmp);
-  return r;
-}
-
-static int
-consensus_compute_digest_as_signed_(const char *cons,
-                                    consensus_digest_t *digest_out)
-{
-  size_t len = strlen(cons);
-  char *tmp = tor_memdup(cons, len);
-  // We use memdup here to ensure that the input is NOT nul-terminated.
-  // This makes it likelier for us to spot bugs.
-  int r = consensus_compute_digest_as_signed(tmp, len, digest_out);
-  tor_free(tmp);
-  return r;
-}
 
 static void
 test_consdiff_smartlist_slice(void *arg)
@@ -91,7 +58,7 @@ test_consdiff_smartlist_slice_string_pos(void *arg)
 
   /* Create a regular smartlist. */
   (void)arg;
-  consensus_split_lines_(sl, "a\nd\nc\na\nb\n", area);
+  consensus_split_lines(sl, "a\nd\nc\na\nb\n", area);
 
   /* See that smartlist_slice_string_pos respects the bounds of the slice. */
   sls = smartlist_slice(sl, 2, 5);
@@ -120,8 +87,8 @@ test_consdiff_lcs_lengths(void *arg)
   int e_lengths2[] = { 0, 1, 1, 2, 3, 4 };
 
   (void)arg;
-  consensus_split_lines_(sl1, "a\nb\nc\nd\ne\n", area);
-  consensus_split_lines_(sl2, "a\nc\nd\ni\ne\n", area);
+  consensus_split_lines(sl1, "a\nb\nc\nd\ne\n", area);
+  consensus_split_lines(sl2, "a\nc\nd\ni\ne\n", area);
 
   sls1 = smartlist_slice(sl1, 0, -1);
   sls2 = smartlist_slice(sl2, 0, -1);
@@ -152,10 +119,10 @@ test_consdiff_trim_slices(void *arg)
   memarea_t *area = memarea_new();
 
   (void)arg;
-  consensus_split_lines_(sl1, "a\nb\nb\nb\nd\n", area);
-  consensus_split_lines_(sl2, "a\nc\nc\nc\nd\n", area);
-  consensus_split_lines_(sl3, "a\nb\nb\nb\na\n", area);
-  consensus_split_lines_(sl4, "c\nb\nb\nb\nc\n", area);
+  consensus_split_lines(sl1, "a\nb\nb\nb\nd\n", area);
+  consensus_split_lines(sl2, "a\nc\nc\nc\nd\n", area);
+  consensus_split_lines(sl3, "a\nb\nb\nb\na\n", area);
+  consensus_split_lines(sl4, "c\nb\nb\nb\nc\n", area);
   sls1 = smartlist_slice(sl1, 0, -1);
   sls2 = smartlist_slice(sl2, 0, -1);
   sls3 = smartlist_slice(sl3, 0, -1);
@@ -198,8 +165,8 @@ test_consdiff_set_changed(void *arg)
   memarea_t *area = memarea_new();
 
   (void)arg;
-  consensus_split_lines_(sl1, "a\nb\na\na\n", area);
-  consensus_split_lines_(sl2, "a\na\na\na\n", area);
+  consensus_split_lines(sl1, "a\nb\na\na\n", area);
+  consensus_split_lines(sl2, "a\na\na\na\n", area);
 
   /* Length of sls1 is 0. */
   sls1 = smartlist_slice(sl1, 0, 0);
@@ -273,8 +240,8 @@ test_consdiff_calc_changes(void *arg)
   memarea_t *area = memarea_new();
 
   (void)arg;
-  consensus_split_lines_(sl1, "a\na\na\na\n", area);
-  consensus_split_lines_(sl2, "a\na\na\na\n", area);
+  consensus_split_lines(sl1, "a\na\na\na\n", area);
+  consensus_split_lines(sl2, "a\na\na\na\n", area);
 
   sls1 = smartlist_slice(sl1, 0, -1);
   sls2 = smartlist_slice(sl2, 0, -1);
@@ -292,7 +259,7 @@ test_consdiff_calc_changes(void *arg)
   tt_assert(!bitarray_is_set(changed2, 3));
 
   smartlist_clear(sl2);
-  consensus_split_lines_(sl2, "a\nb\na\nb\n", area);
+  consensus_split_lines(sl2, "a\nb\na\nb\n", area);
   tor_free(sls1);
   tor_free(sls2);
   sls1 = smartlist_slice(sl1, 0, -1);
@@ -315,7 +282,7 @@ test_consdiff_calc_changes(void *arg)
   bitarray_clear(changed1, 3);
 
   smartlist_clear(sl2);
-  consensus_split_lines_(sl2, "b\nb\nb\nb\n", area);
+  consensus_split_lines(sl2, "b\nb\nb\nb\n", area);
   tor_free(sls1);
   tor_free(sls2);
   sls1 = smartlist_slice(sl1, 0, -1);
@@ -643,8 +610,8 @@ test_consdiff_gen_ed_diff(void *arg)
   /* Test 'a', 'c' and 'd' together. See that it is done in reverse order. */
   smartlist_clear(cons1);
   smartlist_clear(cons2);
-  consensus_split_lines_(cons1, "A\nB\nC\nD\nE\n", area);
-  consensus_split_lines_(cons2, "A\nC\nO\nE\nU\n", area);
+  consensus_split_lines(cons1, "A\nB\nC\nD\nE\n", area);
+  consensus_split_lines(cons2, "A\nC\nO\nE\nU\n", area);
   diff = gen_ed_diff(cons1, cons2, area);
   tt_ptr_op(NULL, OP_NE, diff);
   tt_int_op(7, OP_EQ, smartlist_len(diff));
@@ -660,8 +627,8 @@ test_consdiff_gen_ed_diff(void *arg)
 
   smartlist_clear(cons1);
   smartlist_clear(cons2);
-  consensus_split_lines_(cons1, "B\n", area);
-  consensus_split_lines_(cons2, "A\nB\n", area);
+  consensus_split_lines(cons1, "B\n", area);
+  consensus_split_lines(cons2, "A\nB\n", area);
   diff = gen_ed_diff(cons1, cons2, area);
   tt_ptr_op(NULL, OP_NE, diff);
   tt_int_op(3, OP_EQ, smartlist_len(diff));
@@ -689,7 +656,7 @@ test_consdiff_apply_ed_diff(void *arg)
   diff = smartlist_new();
   setup_capture_of_logs(LOG_WARN);
 
-  consensus_split_lines_(cons1, "A\nB\nC\nD\nE\n", area);
+  consensus_split_lines(cons1, "A\nB\nC\nD\nE\n", area);
 
   /* Command without range. */
   smartlist_add_linecpy(diff, area, "a");
@@ -862,7 +829,7 @@ test_consdiff_apply_ed_diff(void *arg)
   smartlist_clear(diff);
 
   /* Test appending text, 'a'. */
-  consensus_split_lines_(diff, "3a\nU\nO\n.\n0a\nV\n.\n", area);
+  consensus_split_lines(diff, "3a\nU\nO\n.\n0a\nV\n.\n", area);
   cons2 = apply_ed_diff(cons1, diff, 0);
   tt_ptr_op(NULL, OP_NE, cons2);
   tt_int_op(8, OP_EQ, smartlist_len(cons2));
@@ -879,7 +846,7 @@ test_consdiff_apply_ed_diff(void *arg)
   smartlist_free(cons2);
 
   /* Test deleting text, 'd'. */
-  consensus_split_lines_(diff, "4d\n1,2d\n", area);
+  consensus_split_lines(diff, "4d\n1,2d\n", area);
   cons2 = apply_ed_diff(cons1, diff, 0);
   tt_ptr_op(NULL, OP_NE, cons2);
   tt_int_op(2, OP_EQ, smartlist_len(cons2));
@@ -890,7 +857,7 @@ test_consdiff_apply_ed_diff(void *arg)
   smartlist_free(cons2);
 
   /* Test changing text, 'c'. */
-  consensus_split_lines_(diff, "4c\nT\nX\n.\n1,2c\nM\n.\n", area);
+  consensus_split_lines(diff, "4c\nT\nX\n.\n1,2c\nM\n.\n", area);
   cons2 = apply_ed_diff(cons1, diff, 0);
   tt_ptr_op(NULL, OP_NE, cons2);
   tt_int_op(5, OP_EQ, smartlist_len(cons2));
@@ -904,7 +871,7 @@ test_consdiff_apply_ed_diff(void *arg)
   smartlist_free(cons2);
 
   /* Test 'a', 'd' and 'c' together. */
-  consensus_split_lines_(diff, "4c\nT\nX\n.\n2d\n0a\nM\n.\n", area);
+  consensus_split_lines(diff, "4c\nT\nX\n.\n2d\n0a\nM\n.\n", area);
   cons2 = apply_ed_diff(cons1, diff, 0);
   tt_ptr_op(NULL, OP_NE, cons2);
   tt_int_op(6, OP_EQ, smartlist_len(cons2));
@@ -951,12 +918,12 @@ test_consdiff_gen_diff(void *arg)
       );
 
   tt_int_op(0, OP_EQ,
-      consensus_compute_digest_as_signed_(cons1_str, &digests1));
+      consensus_compute_digest_as_signed(cons1_str, &digests1));
   tt_int_op(0, OP_EQ,
-      consensus_compute_digest_(cons2_str, &digests2));
+      consensus_compute_digest(cons2_str, &digests2));
 
-  consensus_split_lines_(cons1, cons1_str, area);
-  consensus_split_lines_(cons2, cons2_str, area);
+  consensus_split_lines(cons1, cons1_str, area);
+  consensus_split_lines(cons2, cons2_str, area);
 
   diff = consdiff_gen_diff(cons1, cons2, &digests1, &digests2, area);
   tt_ptr_op(NULL, OP_EQ, diff);
@@ -970,9 +937,9 @@ test_consdiff_gen_diff(void *arg)
       "directory-signature foo bar\nbar\n"
       );
   tt_int_op(0, OP_EQ,
-      consensus_compute_digest_as_signed_(cons1_str, &digests1));
+      consensus_compute_digest_as_signed(cons1_str, &digests1));
   smartlist_clear(cons1);
-  consensus_split_lines_(cons1, cons1_str, area);
+  consensus_split_lines(cons1, cons1_str, area);
   diff = consdiff_gen_diff(cons1, cons2, &digests1, &digests2, area);
   tt_ptr_op(NULL, OP_NE, diff);
   tt_int_op(11, OP_EQ, smartlist_len(diff));
@@ -1024,13 +991,13 @@ test_consdiff_apply_diff(void *arg)
       "directory-signature foo bar\nbar\n"
       );
   tt_int_op(0, OP_EQ,
-      consensus_compute_digest_(cons1_str, &digests1));
-  consensus_split_lines_(cons1, cons1_str, area);
+      consensus_compute_digest(cons1_str, &digests1));
+  consensus_split_lines(cons1, cons1_str, area);
 
   /* diff doesn't have enough lines. */
   cons2 = consdiff_apply_diff(cons1, diff, &digests1);
   tt_ptr_op(NULL, OP_EQ, cons2);
-  expect_single_log_msg_containing("too short");
+  expect_single_log_msg_containing("too short")
 
   /* first line doesn't match format-version string. */
   smartlist_add_linecpy(diff, area, "foo-bar");
@@ -1038,7 +1005,7 @@ test_consdiff_apply_diff(void *arg)
   mock_clean_saved_logs();
   cons2 = consdiff_apply_diff(cons1, diff, &digests1);
   tt_ptr_op(NULL, OP_EQ, cons2);
-  expect_single_log_msg_containing("format is not known");
+  expect_single_log_msg_containing("format is not known")
 
   /* The first word of the second header line is not "hash". */
   smartlist_clear(diff);
@@ -1048,7 +1015,7 @@ test_consdiff_apply_diff(void *arg)
   mock_clean_saved_logs();
   cons2 = consdiff_apply_diff(cons1, diff, &digests1);
   tt_ptr_op(NULL, OP_EQ, cons2);
-  expect_single_log_msg_containing("does not include the necessary digests");
+  expect_single_log_msg_containing("does not include the necessary digests")
 
   /* Wrong number of words after "hash". */
   smartlist_clear(diff);
@@ -1057,7 +1024,7 @@ test_consdiff_apply_diff(void *arg)
   mock_clean_saved_logs();
   cons2 = consdiff_apply_diff(cons1, diff, &digests1);
   tt_ptr_op(NULL, OP_EQ, cons2);
-  expect_single_log_msg_containing("does not include the necessary digests");
+  expect_single_log_msg_containing("does not include the necessary digests")
 
   /* base16 digests do not have the expected length. */
   smartlist_clear(diff);
@@ -1067,7 +1034,7 @@ test_consdiff_apply_diff(void *arg)
   cons2 = consdiff_apply_diff(cons1, diff, &digests1);
   tt_ptr_op(NULL, OP_EQ, cons2);
   expect_single_log_msg_containing("includes base16-encoded digests of "
-                                   "incorrect size");
+                                   "incorrect size")
 
   /* base16 digests contain non-base16 characters. */
   smartlist_clear(diff);
@@ -1078,7 +1045,7 @@ test_consdiff_apply_diff(void *arg)
   mock_clean_saved_logs();
   cons2 = consdiff_apply_diff(cons1, diff, &digests1);
   tt_ptr_op(NULL, OP_EQ, cons2);
-  expect_single_log_msg_containing("includes malformed digests");
+  expect_single_log_msg_containing("includes malformed digests")
 
   /* Invalid ed diff.
    * As tested in apply_ed_diff, but check that apply_diff does return NULL if
@@ -1095,7 +1062,7 @@ test_consdiff_apply_diff(void *arg)
   cons2 = consdiff_apply_diff(cons1, diff, &digests1);
   tt_ptr_op(NULL, OP_EQ, cons2);
   expect_single_log_msg_containing("because an ed command was missing a line "
-                                   "number");
+                                   "number")
 
   /* Base consensus doesn't match its digest as found in the diff. */
   smartlist_clear(diff);
@@ -1215,3 +1182,4 @@ struct testcase_t consdiff_tests[] = {
   CONSDIFF_LEGACY(apply_diff),
   END_OF_TESTCASES
 };
+

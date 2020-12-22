@@ -1,7 +1,7 @@
 /* Copyright (c) 2001, Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -21,7 +21,6 @@
 #include "lib/log/util_bug.h"
 #include "lib/fs/files.h"
 
-#include "lib/log/escape.h"
 #include "lib/log/log.h"
 #include "lib/encoding/binascii.h"
 #include "lib/encoding/pem.h"
@@ -29,10 +28,6 @@
 #include <string.h>
 #ifdef HAVE_SYS_STAT_H
 #include <sys/stat.h>
-#endif
-
-#ifdef ENABLE_OPENSSL
-#include <openssl/rsa.h>
 #endif
 
 /** Return the number of bytes added by padding method <b>padding</b>.
@@ -59,7 +54,7 @@ crypto_get_rsa_padding(int padding)
     default: tor_assert(0); return -1; // LCOV_EXCL_LINE
     }
 }
-#endif /* defined(ENABLE_OPENSSL) */
+#endif
 
 /** Compare the public-key components of a and b.  Return non-zero iff
  * a==b.  A NULL key is considered to be distinct from all non-NULL
@@ -489,13 +484,11 @@ crypto_pk_write_private_key_to_string(crypto_pk_t *env,
  */
 static int
 crypto_pk_read_from_string_generic(crypto_pk_t *env, const char *src,
-                                   size_t len, int severity,
-                                   bool private_key, int max_bits)
+                                   size_t len, bool private_key)
 {
   if (len == (size_t)-1) // "-1" indicates "use the length of the string."
     len = strlen(src);
 
-  const char *ktype = private_key ? "private key" : "public key";
   const char *tag =
     private_key ? RSA_PRIVATE_TAG : RSA_PUBLIC_TAG;
   size_t buflen = len;
@@ -503,20 +496,14 @@ crypto_pk_read_from_string_generic(crypto_pk_t *env, const char *src,
   int rv = -1;
 
   int n = pem_decode(buf, buflen, src, len, tag);
-  if (n < 0) {
-    log_fn(severity, LD_CRYPTO,
-           "Error decoding PEM wrapper while reading %s", ktype);
+  if (n < 0)
     goto done;
-  }
 
   crypto_pk_t *pk = private_key
-    ? crypto_pk_asn1_decode_private((const char*)buf, n, max_bits)
+    ? crypto_pk_asn1_decode_private((const char*)buf, n)
     : crypto_pk_asn1_decode((const char*)buf, n);
-  if (! pk) {
-    log_fn(severity, LD_CRYPTO,
-           "Error decoding ASN.1 while reading %s", ktype);
+  if (! pk)
     goto done;
-  }
 
   if (private_key)
     crypto_pk_assign_private(env, pk);
@@ -539,8 +526,7 @@ int
 crypto_pk_read_public_key_from_string(crypto_pk_t *env,
                                       const char *src, size_t len)
 {
-  return crypto_pk_read_from_string_generic(env, src, len, LOG_INFO, false,
-                                            -1);
+  return crypto_pk_read_from_string_generic(env, src, len, false);
 }
 
 /** Read a PEM-encoded private key from the <b>len</b>-byte string <b>src</b>
@@ -551,21 +537,7 @@ int
 crypto_pk_read_private_key_from_string(crypto_pk_t *env,
                                        const char *src, ssize_t len)
 {
-  return crypto_pk_read_from_string_generic(env, src, len, LOG_INFO, true,
-                                            -1);
-}
-
-/**
- * As crypto_pk_read_private_key_from_string(), but reject any key
- * with a modulus longer than 1024 bits before doing any expensive
- * validation on it.
- */
-int
-crypto_pk_read_private_key1024_from_string(crypto_pk_t *env,
-                                           const char *src, ssize_t len)
-{
-  return crypto_pk_read_from_string_generic(env, src, len, LOG_INFO, true,
-                                            1024);
+  return crypto_pk_read_from_string_generic(env, src, len, true);
 }
 
 /** If a file is longer than this, we won't try to decode its private key */
@@ -580,24 +552,15 @@ crypto_pk_read_private_key_from_filename(crypto_pk_t *env,
 {
   struct stat st;
   char *buf = read_file_to_str(keyfile, 0, &st);
-  if (!buf) {
-    log_warn(LD_CRYPTO, "Unable to read file for private key in %s",
-             escaped(keyfile));
+  if (!buf)
     return -1;
-  }
   if (st.st_size > MAX_PRIVKEY_FILE_LEN) {
-    log_warn(LD_CRYPTO, "Private key file %s was far too large.",
-             escaped(keyfile));
     tor_free(buf);
     return -1;
   }
 
-  int rv = crypto_pk_read_from_string_generic(env, buf, (ssize_t)st.st_size,
-                                              LOG_WARN, true, -1);
-  if (rv < 0) {
-    log_warn(LD_CRYPTO, "Unable to decode private key from file %s",
-             escaped(keyfile));
-  }
+  int rv = crypto_pk_read_private_key_from_string(env, buf,
+                                                  (ssize_t)st.st_size);
   memwipe(buf, 0, (size_t)st.st_size);
   tor_free(buf);
   return rv;
@@ -677,7 +640,7 @@ crypto_pk_base64_decode_private(const char *str, size_t len)
     goto out;
   }
 
-  pk = crypto_pk_asn1_decode_private(der, der_len, -1);
+  pk = crypto_pk_asn1_decode_private(der, der_len);
 
  out:
   memwipe(der, 0, len+1);

@@ -1,5 +1,5 @@
 /* Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -270,10 +270,10 @@ rep_hist_circbuilding_dormant(time_t now)
 
   /* see if we'll still need to build testing circuits */
   if (server_mode(options) &&
-      (!router_all_orports_seem_reachable(options) ||
+      (!check_whether_orport_reachable(options) ||
        !circuit_enough_testing_circs()))
     return 0;
-  if (!router_dirport_seems_reachable(options))
+  if (!check_whether_dirport_reachable(options))
     return 0;
 
   return 1;

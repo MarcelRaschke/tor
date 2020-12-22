@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2020, The Tor Project, Inc. */
+/* Copyright (c) 2012-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -20,7 +20,7 @@
 #include "core/or/or.h"
 #include "core/mainloop/connection.h"
 #include "core/or/connection_or.h"
-#include "feature/control/control_events.h"
+#include "feature/control/control.h"
 #include "app/config/config.h"
 #include "lib/crypt_ops/crypto_rand.h"
 #include "lib/crypt_ops/crypto_util.h"
@@ -90,7 +90,7 @@ connection_ext_or_transition(or_connection_t *conn)
 
   conn->base_.type = CONN_TYPE_OR;
   TO_CONN(conn)->state = 0; // set the state to a neutral value
-  connection_or_event_status(conn, OR_CONN_EVENT_NEW, 0);
+  control_event_or_conn_status(conn, OR_CONN_EVENT_NEW, 0);
   connection_tls_start_handshake(conn, 1);
 }
 
@@ -391,7 +391,7 @@ connection_ext_or_auth_handle_client_hash(connection_t *conn)
 }
 
 /** Handle data from <b>or_conn</b> received on Extended ORPort.
- *  Return -1 on error. 0 on insufficient data. 1 on correct. */
+ *  Return -1 on error. 0 on unsufficient data. 1 on correct. */
 static int
 connection_ext_or_auth_process_inbuf(or_connection_t *or_conn)
 {
@@ -493,10 +493,6 @@ connection_ext_or_handle_cmd_useraddr(connection_t *conn,
     tor_free(conn->address);
   }
   conn->address = tor_addr_to_str_dup(&addr);
-
-  /* Now that we know the address, we don't have to manually override rate
-   * limiting. */
-  conn->always_rate_limit_as_remote = 0;
 
   return 0;
 }
@@ -606,7 +602,7 @@ connection_ext_or_process_inbuf(or_connection_t *or_conn)
                                              command->body, command->len) < 0)
         goto err;
     } else {
-      log_notice(LD_NET,"Got Extended ORPort command we don't recognize (%u).",
+      log_notice(LD_NET,"Got Extended ORPort command we don't regognize (%u).",
                  command->cmd);
     }
 
@@ -656,19 +652,6 @@ connection_ext_or_start_auth(or_connection_t *or_conn)
   return 0;
 }
 
-/** Creates an Extended ORPort identifier for <b>conn</b> and deposits
- *  it into the global list of identifiers. */
-void
-connection_or_set_ext_or_identifier(or_connection_t *conn)
-{
-  char random_id[EXT_OR_CONN_ID_LEN];
-
-  if (!conn->ext_or_conn_id)
-    conn->ext_or_conn_id = tor_malloc_zero(EXT_OR_CONN_ID_LEN);
-
-  memcpy(conn->ext_or_conn_id, random_id, EXT_OR_CONN_ID_LEN);
-}
-
 /** Free any leftover allocated memory of the ext_orport.c subsystem. */
 void
 ext_orport_free_all(void)
@@ -676,3 +659,4 @@ ext_orport_free_all(void)
   if (ext_or_auth_cookie) /* Free the auth cookie */
     tor_free(ext_or_auth_cookie);
 }
+

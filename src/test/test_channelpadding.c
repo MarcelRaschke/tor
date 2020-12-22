@@ -1,7 +1,7 @@
-/* Copyright (c) 2016-2020, The Tor Project, Inc. */
+/* Copyright (c) 2016-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
-#define CHANNEL_OBJECT_PRIVATE
+#define TOR_CHANNEL_INTERNAL_
 #define MAINLOOP_PRIVATE
 #define NETWORKSTATUS_PRIVATE
 #define TOR_TIMERS_PRIVATE
@@ -21,7 +21,7 @@
 #include "test/log_test_helpers.h"
 #include "lib/tls/tortls.h"
 #include "lib/evloop/timers.h"
-#include "lib/buf/buffers.h"
+#include "lib/container/buffers.h"
 
 #include "core/or/cell_st.h"
 #include "feature/nodelist/networkstatus_st.h"
@@ -289,6 +289,8 @@ test_channelpadding_timers(void *arg)
   channel_t *chans[CHANNELS_TO_TEST];
   (void)arg;
 
+  tor_libevent_postfork();
+
   if (!connection_array)
     connection_array = smartlist_new();
 
@@ -391,6 +393,7 @@ test_channelpadding_killonehop(void *arg)
   channelpadding_decision_t decision;
   int64_t new_time;
   (void)arg;
+  tor_libevent_postfork();
 
   routerstatus_t *relay = tor_malloc_zero(sizeof(routerstatus_t));
   monotime_init();
@@ -498,6 +501,8 @@ test_channelpadding_consensus(void *arg)
   int64_t val;
   int64_t new_time;
   (void)arg;
+
+  tor_libevent_postfork();
 
   /*
    * Params tested:
@@ -892,6 +897,8 @@ test_channelpadding_decide_to_pad_channel(void *arg)
   if (!connection_array)
     connection_array = smartlist_new();
   (void)arg;
+
+  tor_libevent_postfork();
 
   monotime_init();
   monotime_enable_test_mocking();

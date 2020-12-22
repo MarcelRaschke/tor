@@ -1,6 +1,5 @@
 orconfig.h
 lib/cc/*.h
-lib/container/*.h
 lib/ctime/*.h
 lib/encoding/*.h
 lib/intmath/*.h

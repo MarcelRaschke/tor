@@ -1,7 +1,7 @@
 /* Copyright (c) 2001, Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -28,7 +28,7 @@
 #error "We require OpenSSL >= 1.0.0"
 #endif
 
-DISABLE_GCC_WARNING("-Wredundant-decls")
+DISABLE_GCC_WARNING(redundant-decls)
 
 #include <stdlib.h>
 #include <string.h>
@@ -37,12 +37,13 @@ DISABLE_GCC_WARNING("-Wredundant-decls")
 #include <openssl/engine.h>
 #include <openssl/modes.h>
 
-ENABLE_GCC_WARNING("-Wredundant-decls")
+ENABLE_GCC_WARNING(redundant-decls)
 
+#include "lib/crypt_ops/aes.h"
 #include "lib/log/log.h"
 #include "lib/ctime/di_ops.h"
 
-#ifdef OPENSSL_NO_ENGINE
+#ifdef ANDROID
 /* Android's OpenSSL seems to have removed all of its Engine support. */
 #define DISABLE_ENGINES
 #endif
@@ -100,12 +101,12 @@ aes_cnt_cipher_t *
 aes_new_cipher(const uint8_t *key, const uint8_t *iv, int key_bits)
 {
   EVP_CIPHER_CTX *cipher = EVP_CIPHER_CTX_new();
-  const EVP_CIPHER *c = NULL;
+  const EVP_CIPHER *c;
   switch (key_bits) {
     case 128: c = EVP_aes_128_ctr(); break;
     case 192: c = EVP_aes_192_ctr(); break;
     case 256: c = EVP_aes_256_ctr(); break;
-    default: tor_assert_unreached(); // LCOV_EXCL_LINE
+    default: tor_assert(0); // LCOV_EXCL_LINE
   }
   EVP_EncryptInit(cipher, c, key, iv);
   return (aes_cnt_cipher_t *) cipher;
@@ -147,13 +148,13 @@ evaluate_ctr_for_aes(void)
 {
   return 0;
 }
-#else /* !defined(USE_EVP_AES_CTR) */
+#else /* !(defined(USE_EVP_AES_CTR)) */
 
 /*======================================================================*/
 /* Interface to AES code, and counter implementation */
 
 /** Implements an AES counter-mode cipher. */
-struct aes_cnt_cipher_t {
+struct aes_cnt_cipher {
 /** This next element (however it's defined) is the AES key. */
   union {
     EVP_CIPHER_CTX evp;

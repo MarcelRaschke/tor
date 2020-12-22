@@ -1,17 +1,8 @@
-#!/usr/bin/env python
-
-# Future imports for Python 2.7, mandatory in 3.0
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+#!/usr/bin/python3
 
 import os
 import os.path
 import re
-import sys
-
-def warn(msg):
-    sys.stderr.write("WARNING: %s\n"%msg)
 
 # Find all the include files, map them to their real names.
 
@@ -20,8 +11,6 @@ def exclude(paths, dirnames):
         if p in dirnames:
             dirnames.remove(p)
 
-DUPLICATE = object()
-
 def get_include_map():
     includes = { }
 
@@ -29,17 +18,8 @@ def get_include_map():
         exclude(["ext", "win32"], dirnames)
 
         for fname in fnames:
-            # Avoid editor temporary files
-            if fname.startswith("."):
-                continue
-            if fname.startswith("#"):
-                continue
-
             if fname.endswith(".h"):
-                if fname in includes:
-                    warn("Multiple headers named %s"%fname)
-                    includes[fname] = DUPLICATE
-                    continue
+                assert fname not in includes
                 include = os.path.join(dirpath, fname)
                 assert include.startswith("src/")
                 includes[fname] = include[4:]
@@ -57,7 +37,7 @@ def fix_includes(inp, out, mapping):
         if m:
             include,hdr,rest = m.groups()
             basehdr = get_base_header_name(hdr)
-            if basehdr in mapping and mapping[basehdr] is not DUPLICATE:
+            if basehdr in mapping:
                 out.write('{}{}{}\n'.format(include,mapping[basehdr],rest))
                 continue
 
@@ -69,12 +49,6 @@ for dirpath,dirnames,fnames in os.walk("src"):
     exclude(["trunnel"], dirnames)
 
     for fname in fnames:
-        # Avoid editor temporary files
-        if fname.startswith("."):
-            continue
-        if fname.startswith("#"):
-            continue
-
         if fname.endswith(".c") or fname.endswith(".h"):
             fname = os.path.join(dirpath, fname)
             tmpfile = fname+".tmp"

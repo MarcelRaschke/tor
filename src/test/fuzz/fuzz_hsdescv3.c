@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2020, The Tor Project, Inc. */
+/* Copyright (c) 2017-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #define HS_DESCRIPTOR_PRIVATE
@@ -35,21 +35,16 @@ mock_rsa_ed25519_crosscert_check(const uint8_t *crosscert,
 
 static size_t
 mock_decrypt_desc_layer(const hs_descriptor_t *desc,
+                        const uint8_t *encrypted_blob,
+                        size_t encrypted_blob_size,
                         const uint8_t *descriptor_cookie,
-                        bool is_superencrypted_layer,
+                        int is_superencrypted_layer,
                         char **decrypted_out)
 {
   (void)is_superencrypted_layer;
   (void)desc;
   (void)descriptor_cookie;
   const size_t overhead = HS_DESC_ENCRYPTED_SALT_LEN + DIGEST256_LEN;
-  const uint8_t *encrypted_blob = (is_superencrypted_layer)
-    ? desc->plaintext_data.superencrypted_blob
-    : desc->superencrypted_data.encrypted_blob;
-  size_t encrypted_blob_size = (is_superencrypted_layer)
-    ? desc->plaintext_data.superencrypted_blob_size
-    : desc->superencrypted_data.encrypted_blob_size;
-
   if (encrypted_blob_size < overhead)
     return 0;
   *decrypted_out = tor_memdup_nulterm(
@@ -85,12 +80,12 @@ int
 fuzz_main(const uint8_t *data, size_t sz)
 {
   hs_descriptor_t *desc = NULL;
-  hs_subcredential_t subcredential;
+  uint8_t subcredential[DIGEST256_LEN];
 
   char *fuzzing_data = tor_memdup_nulterm(data, sz);
-  memset(&subcredential, 'A', sizeof(subcredential));
+  memset(subcredential, 'A', sizeof(subcredential));
 
-  hs_desc_decode_descriptor(fuzzing_data, &subcredential, NULL, &desc);
+  hs_desc_decode_descriptor(fuzzing_data, subcredential, NULL, &desc);
   if (desc) {
     log_debug(LD_GENERAL, "Decoding okay");
     hs_descriptor_free(desc);
@@ -101,3 +96,4 @@ fuzz_main(const uint8_t *data, size_t sz)
   tor_free(fuzzing_data);
   return 0;
 }
+

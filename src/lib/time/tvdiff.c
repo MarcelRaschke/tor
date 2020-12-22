@@ -1,6 +1,6 @@
 /* Copyright (c) 2003-2004, Roger Dingledine
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -11,7 +11,6 @@
 #include "lib/time/tvdiff.h"
 
 #include "lib/cc/compat_compiler.h"
-#include "lib/defs/time.h"
 #include "lib/log/log.h"
 
 #ifdef _WIN32
@@ -20,6 +19,8 @@
 #ifdef HAVE_SYS_TIME_H
 #include <sys/time.h>
 #endif
+
+#define TOR_USEC_PER_SEC 1000000
 
 /** Return the difference between start->tv_sec and end->tv_sec.
  * Returns INT64_MAX on overflow and underflow.
@@ -30,7 +31,7 @@ tv_secdiff_impl(const struct timeval *start, const struct timeval *end)
   const int64_t s = (int64_t)start->tv_sec;
   const int64_t e = (int64_t)end->tv_sec;
 
-  /* This may not be the most efficient way of implementing this check,
+  /* This may not be the most efficient way of implemeting this check,
    * but it's easy to see that it's correct and doesn't overflow */
 
   if (s > 0 && e < INT64_MIN + s) {

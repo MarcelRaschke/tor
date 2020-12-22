@@ -1,13 +1,8 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
-
-/**
- * @file cached_dir_st.h
- * @brief Cached large directory object structure.
- **/
 
 #ifndef CACHED_DIR_ST_H
 #define CACHED_DIR_ST_H
@@ -26,4 +21,5 @@ struct cached_dir_t {
   int refcnt; /**< Reference count for this cached_dir_t. */
 };
 
-#endif /* !defined(CACHED_DIR_ST_H) */
+#endif
+

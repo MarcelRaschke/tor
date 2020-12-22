@@ -1,11 +1,6 @@
 /* Copyright (c) 2003-2004, Roger Dingledine
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
-
-/**
- * @file socketpair.c
- * @brief Replacement socketpair() for systems that lack it
- **/
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 
 #include "lib/cc/torint.h"
 #include "lib/net/socketpair.h"
@@ -27,11 +22,11 @@
 #include <windows.h>
 #define socket_errno() (WSAGetLastError())
 #define SOCKET_EPROTONOSUPPORT WSAEPROTONOSUPPORT
-#else /* !defined(_WIN32) */
+#else
 #define closesocket(x) close(x)
 #define socket_errno() (errno)
 #define SOCKET_EPROTONOSUPPORT EPROTONOSUPPORT
-#endif /* defined(_WIN32) */
+#endif
 
 #ifdef NEED_ERSATZ_SOCKETPAIR
 
@@ -67,7 +62,7 @@ get_local_listener(int family, int type)
     len = sizeof(sin);
   } else {
     sa = (struct sockaddr *) &sin6;
-    sin6.sin6_family = AF_INET6;
+    sin6.sin6_family = AF_INET;
     sin6.sin6_addr.s6_addr[15] = 1;
     len = sizeof(sin6);
   }
@@ -110,12 +105,7 @@ sockaddr_eq(struct sockaddr *sa1, struct sockaddr *sa2)
 /**
  * Helper used to implement socketpair on systems that lack it, by
  * making a direct connection to localhost.
- *
- * See tor_socketpair() for details.
- *
- * The direct connection defaults to IPv4, but falls back to IPv6 if
- * IPv4 is not supported.
- **/
+ */
 int
 tor_ersatz_socketpair(int family, int type, int protocol, tor_socket_t fd[2])
 {

@@ -1,7 +1,7 @@
 /* Copyright (c) 2001, Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -26,10 +26,6 @@
 #include <string.h>
 #include <time.h>
 
-#ifdef HAVE_SYS_TIME_H
-#include <sys/time.h>
-#endif
-
 #ifdef _WIN32
 /* For struct timeval */
 #include <winsock2.h>
@@ -39,8 +35,6 @@
  *
  * Convert *<b>timep</b> to a struct tm in local time, and store the value in
  * *<b>result</b>.  Return the result on success, or NULL on failure.
- *
- * Treat malformatted inputs localtime outputs as a BUG.
  */
 struct tm *
 tor_localtime_r(const time_t *timep, struct tm *result)
@@ -58,8 +52,6 @@ tor_localtime_r(const time_t *timep, struct tm *result)
  *
  * Convert *<b>timep</b> to a struct tm in UTC, and store the value in
  * *<b>result</b>.  Return the result on success, or NULL on failure.
- *
- * Treat malformatted inputs or gmtime outputs as a BUG.
  */
 struct tm *
 tor_gmtime_r(const time_t *timep, struct tm *result)

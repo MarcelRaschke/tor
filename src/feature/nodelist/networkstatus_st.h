@@ -1,13 +1,8 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
-
-/**
- * @file networkstatus_st.h
- * @brief Networkstatus consensus/vote structure.
- **/
 
 #ifndef NETWORKSTATUS_ST_H
 #define NETWORKSTATUS_ST_H
@@ -104,9 +99,6 @@ struct networkstatus_t {
 
   /** List of key=value strings from the headers of the bandwidth list file */
   smartlist_t *bw_file_headers;
-
-  /** A SHA256 digest of the bandwidth file used in a vote. */
-  uint8_t bw_file_digest256[DIGEST256_LEN];
 };
 
-#endif /* !defined(NETWORKSTATUS_ST_H) */
+#endif

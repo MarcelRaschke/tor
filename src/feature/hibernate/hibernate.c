@@ -1,5 +1,5 @@
 /* Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -35,9 +35,8 @@ hibernating, phase 2:
 #include "core/mainloop/connection.h"
 #include "core/or/connection_edge.h"
 #include "core/or/connection_or.h"
-#include "feature/control/control_events.h"
+#include "feature/control/control.h"
 #include "lib/crypt_ops/crypto_rand.h"
-#include "lib/defs/time.h"
 #include "feature/hibernate/hibernate.h"
 #include "core/mainloop/mainloop.h"
 #include "feature/relay/router.h"
@@ -51,25 +50,14 @@ hibernating, phase 2:
 #include <unistd.h>
 #endif
 
-#ifdef HAVE_SYSTEMD
-#  if defined(__COVERITY__) && !defined(__INCLUDE_LEVEL__)
-/* Systemd's use of gcc's __INCLUDE_LEVEL__ extension macro appears to confuse
- * Coverity. Here's a kludge to unconfuse it.
- */
-#   define __INCLUDE_LEVEL__ 2
-#endif /* defined(__COVERITY__) && !defined(__INCLUDE_LEVEL__) */
-#include <systemd/sd-daemon.h>
-#endif /* defined(HAVE_SYSTEMD) */
-
 /** Are we currently awake, asleep, running out of bandwidth, or shutting
  * down? */
 static hibernate_state_t hibernate_state = HIBERNATE_STATE_INITIAL;
 /** If are hibernating, when do we plan to wake up? Set to 0 if we
  * aren't hibernating. */
 static time_t hibernate_end_time = 0;
-/** If we are shutting down, when do we plan to finally exit? Set to 0 if we
- * aren't shutting down. (This is obsolete; scheduled shutdowns are supposed
- * to happen from mainloop_schedule_shutdown() now.) */
+/** If we are shutting down, when do we plan finally exit? Set to 0 if
+ * we aren't shutting down. */
 static time_t shutdown_time = 0;
 
 /** A timed event that we'll use when it's time to wake up from
@@ -562,7 +550,7 @@ time_to_record_bandwidth_usage(time_t now)
   /* Note every 600 sec */
 #define NOTE_INTERVAL (600)
   /* Or every 20 megabytes */
-#define NOTE_BYTES (20*1024*1024)
+#define NOTE_BYTES 20*(1024*1024)
   static uint64_t last_read_bytes_noted = 0;
   static uint64_t last_written_bytes_noted = 0;
   static time_t last_time_noted = 0;
@@ -815,7 +803,7 @@ hibernate_soft_limit_reached(void)
    * We want to stop accepting connections when ALL of the following are true:
    *   - We expect to use up the remaining bytes in under 3 hours
    *   - We have used up 95% of our bytes.
-   *   - We have less than 500MBytes left.
+   *   - We have less than 500MB of bytes left.
    */
   uint64_t soft_limit = (uint64_t) (acct_max * SOFT_LIM_PCT);
   if (acct_max > SOFT_LIM_BYTES && acct_max - SOFT_LIM_BYTES > soft_limit) {
@@ -867,33 +855,7 @@ hibernate_begin(hibernate_state_t new_state, time_t now)
     log_notice(LD_GENERAL,"Interrupt: we have stopped accepting new "
                "connections, and will shut down in %d seconds. Interrupt "
                "again to exit now.", options->ShutdownWaitLength);
-    /* We add an arbitrary delay here so that even if something goes wrong
-     * with the mainloop shutdown code, we can still shutdown from
-     * consider_hibernation() if we call it... but so that the
-     * mainloop_schedule_shutdown() mechanism will be the first one called.
-     */
-    shutdown_time = time(NULL) + options->ShutdownWaitLength + 5;
-    mainloop_schedule_shutdown(options->ShutdownWaitLength);
-#ifdef HAVE_SYSTEMD
-    /* tell systemd that we may need more than the default 90 seconds to shut
-     * down so they don't kill us. add some extra time to actually finish
-     * shutting down, otherwise systemd will kill us immediately after the
-     * EXTEND_TIMEOUT_USEC expires. this is an *upper* limit; tor will probably
-     * only take one or two more seconds, but assume that maybe we got swapped
-     * out and it takes a little while longer.
-     *
-     * as of writing, this is a no-op with all-defaults: ShutdownWaitLength is
-     * 30 seconds, so this will extend the timeout to 60 seconds.
-     * default systemd DefaultTimeoutStopSec is 90 seconds, so systemd will
-     * wait (up to) 90 seconds anyways.
-     *
-     * 2^31 usec = ~2147 sec = ~35 min. probably nobody will actually set
-     * ShutdownWaitLength to more than that, but use a longer type so we don't
-     * need to think about UB on overflow
-     */
-    sd_notifyf(0, "EXTEND_TIMEOUT_USEC=%" PRIu64,
-            ((uint64_t)(options->ShutdownWaitLength) + 30) * TOR_USEC_PER_SEC);
-#endif /* defined(HAVE_SYSTEMD) */
+    shutdown_time = time(NULL) + options->ShutdownWaitLength;
   } else { /* soft limit reached */
     hibernate_end_time = interval_end_time;
   }
@@ -1102,12 +1064,11 @@ consider_hibernation(time_t now)
   hibernate_state_t prev_state = hibernate_state;
 
   /* If we're in 'exiting' mode, then we just shut down after the interval
-   * elapses.  The mainloop was supposed to catch this via
-   * mainloop_schedule_shutdown(), but apparently it didn't. */
+   * elapses. */
   if (hibernate_state == HIBERNATE_STATE_EXITING) {
     tor_assert(shutdown_time);
     if (shutdown_time <= now) {
-      log_notice(LD_BUG, "Mainloop did not catch shutdown event; exiting.");
+      log_notice(LD_GENERAL, "Clean shutdown finished. Exiting.");
       tor_shutdown_event_loop_and_exit(0);
     }
     return; /* if exiting soon, don't worry about bandwidth limits */
@@ -1119,7 +1080,7 @@ consider_hibernation(time_t now)
     if (hibernate_end_time > now && accounting_enabled) {
       /* If we're hibernating, don't wake up until it's time, regardless of
        * whether we're in a new interval. */
-      return;
+      return ;
     } else {
       hibernate_end_time_elapsed(now);
     }
@@ -1247,6 +1208,8 @@ on_hibernate_state_change(hibernate_state_t prev_state)
   if (prev_state != HIBERNATE_STATE_INITIAL) {
     rescan_periodic_events(get_options());
   }
+
+  reschedule_per_second_timer();
 }
 
 /** Free all resources held by the accounting module */

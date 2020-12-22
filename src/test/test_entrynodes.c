@@ -1,11 +1,10 @@
-/* Copyright (c) 2014-2020, The Tor Project, Inc. */
+/* Copyright (c) 2014-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #include "orconfig.h"
 
 #define CIRCUITLIST_PRIVATE
 #define CIRCUITBUILD_PRIVATE
-#define CONFIG_PRIVATE
 #define STATEFILE_PRIVATE
 #define ENTRYNODES_PRIVATE
 #define ROUTERLIST_PRIVATE
@@ -18,7 +17,7 @@
 #include "core/or/circuitlist.h"
 #include "core/or/circuitbuild.h"
 #include "app/config/config.h"
-#include "lib/confmgt/confmgt.h"
+#include "app/config/confparse.h"
 #include "lib/crypt_ops/crypto_rand.h"
 #include "feature/dircommon/directory.h"
 #include "feature/dirclient/dirclient.h"
@@ -68,17 +67,16 @@ static networkstatus_t *dummy_consensus = NULL;
 
 static smartlist_t *big_fake_net_nodes = NULL;
 
-static const smartlist_t *
+static smartlist_t *
 bfn_mock_nodelist_get_list(void)
 {
   return big_fake_net_nodes;
 }
 
 static networkstatus_t *
-bfn_mock_networkstatus_get_reasonably_live_consensus(time_t now, int flavor)
+bfn_mock_networkstatus_get_live_consensus(time_t now)
 {
   (void)now;
-  (void)flavor;
   return dummy_consensus;
 }
 
@@ -120,16 +118,13 @@ big_fake_network_cleanup(const struct testcase_t *testcase, void *ptr)
   UNMOCK(nodelist_get_list);
   UNMOCK(node_get_by_id);
   UNMOCK(get_or_state);
-  UNMOCK(networkstatus_get_reasonably_live_consensus);
+  UNMOCK(networkstatus_get_live_consensus);
   or_state_free(dummy_state);
   dummy_state = NULL;
   tor_free(dummy_consensus);
 
   return 1; /* NOP */
 }
-
-#define REASONABLY_FUTURE " reasonably-future"
-#define REASONABLY_PAST " reasonably-past"
 
 /* Unittest setup function: Setup a fake network. */
 static void *
@@ -140,13 +135,6 @@ big_fake_network_setup(const struct testcase_t *testcase)
   /* These are minimal node_t objects that only contain the aspects of node_t
    * that we need for entrynodes.c. */
   const int N_NODES = 271;
-
-  const char *argument = testcase->setup_data;
-  int reasonably_future_consensus = 0, reasonably_past_consensus = 0;
-  if (argument) {
-    reasonably_future_consensus = strstr(argument, REASONABLY_FUTURE) != NULL;
-    reasonably_past_consensus = strstr(argument, REASONABLY_PAST) != NULL;
-  }
 
   big_fake_net_nodes = smartlist_new();
   for (i = 0; i < N_NODES; ++i) {
@@ -171,8 +159,8 @@ big_fake_network_setup(const struct testcase_t *testcase)
 
     /* Note: all these guards have the same address, so you'll need to
      * disable EnforceDistinctSubnets when a restriction is applied. */
-    tor_addr_from_ipv4h(&n->rs->ipv4_addr, 0x04020202);
-    n->rs->ipv4_orport = 1234;
+    n->rs->addr = 0x04020202;
+    n->rs->or_port = 1234;
     n->rs->is_v2_dir = 1;
     n->rs->has_bandwidth = 1;
     n->rs->bandwidth_kb = 30;
@@ -198,33 +186,20 @@ big_fake_network_setup(const struct testcase_t *testcase)
       n->md->exit_policy = parse_short_policy("accept 443");
     }
 
-    n->nodelist_idx = smartlist_len(big_fake_net_nodes);
     smartlist_add(big_fake_net_nodes, n);
   }
 
-  dummy_state = or_state_new();
+  dummy_state = tor_malloc_zero(sizeof(or_state_t));
   dummy_consensus = tor_malloc_zero(sizeof(networkstatus_t));
-  if (reasonably_future_consensus) {
-    /* Make the dummy consensus valid in 6 hours, and expiring in 7 hours. */
-    dummy_consensus->valid_after = approx_time() + 6*3600;
-    dummy_consensus->valid_until = approx_time() + 7*3600;
-  } else if (reasonably_past_consensus) {
-    /* Make the dummy consensus valid from 16 hours ago, but expired 12 hours
-     * ago. */
-    dummy_consensus->valid_after = approx_time() - 16*3600;
-    dummy_consensus->valid_until = approx_time() - 12*3600;
-  } else {
-    /* Make the dummy consensus valid for an hour either side of now. */
-    dummy_consensus->valid_after = approx_time() - 3600;
-    dummy_consensus->valid_until = approx_time() + 3600;
-  }
+  dummy_consensus->valid_after = approx_time() - 3600;
+  dummy_consensus->valid_until = approx_time() + 3600;
 
   MOCK(nodelist_get_list, bfn_mock_nodelist_get_list);
   MOCK(node_get_by_id, bfn_mock_node_get_by_id);
   MOCK(get_or_state,
        get_or_state_replacement);
-  MOCK(networkstatus_get_reasonably_live_consensus,
-       bfn_mock_networkstatus_get_reasonably_live_consensus);
+  MOCK(networkstatus_get_live_consensus,
+       bfn_mock_networkstatus_get_live_consensus);
   /* Return anything but NULL (it's interpreted as test fail) */
   return (void*)testcase;
 }
@@ -236,12 +211,12 @@ mock_randomize_time_no_randomization(time_t a, time_t b)
   return a;
 }
 
-static or_options_t *mocked_options;
+static or_options_t mocked_options;
 
 static const or_options_t *
 mock_get_options(void)
 {
-  return mocked_options;
+  return &mocked_options;
 }
 
 #define TEST_IPV4_ADDR "123.45.67.89"
@@ -260,7 +235,7 @@ test_node_preferred_orport(void *arg)
   tor_addr_port_t ap;
 
   /* Setup options */
-  mocked_options = options_new();
+  memset(&mocked_options, 0, sizeof(mocked_options));
   /* We don't test ClientPreferIPv6ORPort here, because it's used in
    * nodelist_set_consensus to setup node.ipv6_preferred, which we set
    * directly. */
@@ -272,8 +247,8 @@ test_node_preferred_orport(void *arg)
 
   /* Setup node_ri */
   memset(&node_ri, 0, sizeof(node_ri));
-  tor_addr_copy(&node_ri.ipv4_addr, &ipv4_addr);
-  node_ri.ipv4_orport = ipv4_port;
+  node_ri.addr = tor_addr_to_ipv4h(&ipv4_addr);
+  node_ri.or_port = ipv4_port;
   tor_addr_copy(&node_ri.ipv6_addr, &ipv6_addr);
   node_ri.ipv6_orport = ipv6_port;
 
@@ -283,8 +258,8 @@ test_node_preferred_orport(void *arg)
 
   /* Check the preferred address is IPv4 if we're only using IPv4, regardless
    * of whether we prefer it or not */
-  mocked_options->ClientUseIPv4 = 1;
-  mocked_options->ClientUseIPv6 = 0;
+  mocked_options.ClientUseIPv4 = 1;
+  mocked_options.ClientUseIPv6 = 0;
   node.ipv6_preferred = 0;
   node_get_pref_orport(&node, &ap);
   tt_assert(tor_addr_eq(&ap.addr, &ipv4_addr));
@@ -297,8 +272,8 @@ test_node_preferred_orport(void *arg)
 
   /* Check the preferred address is IPv4 if we're using IPv4 and IPv6, but
    * don't prefer the IPv6 address */
-  mocked_options->ClientUseIPv4 = 1;
-  mocked_options->ClientUseIPv6 = 1;
+  mocked_options.ClientUseIPv4 = 1;
+  mocked_options.ClientUseIPv6 = 1;
   node.ipv6_preferred = 0;
   node_get_pref_orport(&node, &ap);
   tt_assert(tor_addr_eq(&ap.addr, &ipv4_addr));
@@ -306,29 +281,28 @@ test_node_preferred_orport(void *arg)
 
   /* Check the preferred address is IPv6 if we prefer it and
    * ClientUseIPv6 is 1, regardless of ClientUseIPv4 */
-  mocked_options->ClientUseIPv4 = 1;
-  mocked_options->ClientUseIPv6 = 1;
+  mocked_options.ClientUseIPv4 = 1;
+  mocked_options.ClientUseIPv6 = 1;
   node.ipv6_preferred = 1;
   node_get_pref_orport(&node, &ap);
   tt_assert(tor_addr_eq(&ap.addr, &ipv6_addr));
   tt_assert(ap.port == ipv6_port);
 
-  mocked_options->ClientUseIPv4 = 0;
+  mocked_options.ClientUseIPv4 = 0;
   node_get_pref_orport(&node, &ap);
   tt_assert(tor_addr_eq(&ap.addr, &ipv6_addr));
   tt_assert(ap.port == ipv6_port);
 
   /* Check the preferred address is IPv6 if we don't prefer it, but
    * ClientUseIPv4 is 0 */
-  mocked_options->ClientUseIPv4 = 0;
-  mocked_options->ClientUseIPv6 = 1;
-  node.ipv6_preferred = reachable_addr_prefer_ipv6_orport(mocked_options);
+  mocked_options.ClientUseIPv4 = 0;
+  mocked_options.ClientUseIPv6 = 1;
+  node.ipv6_preferred = fascist_firewall_prefer_ipv6_orport(&mocked_options);
   node_get_pref_orport(&node, &ap);
   tt_assert(tor_addr_eq(&ap.addr, &ipv6_addr));
   tt_assert(ap.port == ipv6_port);
 
  done:
-  or_options_free(mocked_options);
   UNMOCK(get_options);
 }
 
@@ -390,13 +364,12 @@ test_entry_guard_encode_for_state_minimal(void *arg)
   eg->confirmed_idx = -1;
 
   char *s = NULL;
-  s = entry_guard_encode_for_state(eg, 0);
+  s = entry_guard_encode_for_state(eg);
 
   tt_str_op(s, OP_EQ,
             "in=wubwub "
             "rsa_id=706C75727079666C75727079736C75727079646F "
             "sampled_on=2016-11-14T00:00:00 "
-            "sampled_idx=0 "
             "listed=0");
 
  done:
@@ -422,11 +395,10 @@ test_entry_guard_encode_for_state_maximal(void *arg)
   eg->currently_listed = 1;
   eg->confirmed_on_date = 1479081690;
   eg->confirmed_idx = 333;
-  eg->sampled_idx = 42;
   eg->extra_state_fields = tor_strdup("and the green grass grew all around");
 
   char *s = NULL;
-  s = entry_guard_encode_for_state(eg, 0);
+  s = entry_guard_encode_for_state(eg);
 
   tt_str_op(s, OP_EQ,
             "in=default "
@@ -434,7 +406,6 @@ test_entry_guard_encode_for_state_maximal(void *arg)
             "bridge_addr=8.8.4.4:9999 "
             "nickname=Fred "
             "sampled_on=2016-11-14T00:00:00 "
-            "sampled_idx=0 "
             "sampled_by=1.2.3 "
             "unlisted_since=2016-11-14T00:00:45 "
             "listed=1 "
@@ -624,47 +595,39 @@ test_entry_guard_parse_from_state_full(void *arg)
   const char STATE[] =
   "Guard in=default rsa_id=214F44BD5B638E8C817D47FF7C97397790BF0345 "
     "nickname=TotallyNinja sampled_on=2016-11-12T19:32:49 "
-    "sampled_idx=0 "
     "sampled_by=0.3.0.0-alpha-dev "
     "listed=1\n"
   "Guard in=default rsa_id=052900AB0EA3ED54BAB84AE8A99E74E8693CE2B2 "
     "nickname=5OfNovember sampled_on=2016-11-20T04:32:05 "
-    "sampled_idx=1 "
     "sampled_by=0.3.0.0-alpha-dev "
     "listed=1 confirmed_on=2016-11-22T08:13:28 confirmed_idx=0 "
     "pb_circ_attempts=4.000000 pb_circ_successes=2.000000 "
     "pb_successful_circuits_closed=2.000000\n"
   "Guard in=default rsa_id=7B700C0C207EBD0002E00F499BE265519AC3C25A "
     "nickname=dc6jgk11 sampled_on=2016-11-28T11:50:13 "
-    "sampled_idx=2 "
     "sampled_by=0.3.0.0-alpha-dev "
     "listed=1 confirmed_on=2016-11-24T08:45:30 confirmed_idx=4 "
     "pb_circ_attempts=5.000000 pb_circ_successes=5.000000 "
     "pb_successful_circuits_closed=5.000000\n"
   "Guard in=wobblesome rsa_id=7B700C0C207EBD0002E00F499BE265519AC3C25A "
     "nickname=dc6jgk11 sampled_on=2016-11-28T11:50:13 "
-    "sampled_idx=0 "
     "sampled_by=0.3.0.0-alpha-dev "
     "listed=1\n"
   "Guard in=default rsa_id=E9025AD60D86875D5F11548D536CC6AF60F0EF5E "
     "nickname=maibrunn sampled_on=2016-11-25T22:36:38 "
-    "sampled_idx=3 "
     "sampled_by=0.3.0.0-alpha-dev listed=1\n"
   "Guard in=default rsa_id=DCD30B90BA3A792DA75DC54A327EF353FB84C38E "
     "nickname=Unnamed sampled_on=2016-11-25T14:34:00 "
-    "sampled_idx=10 "
     "sampled_by=0.3.0.0-alpha-dev listed=1\n"
   "Guard in=bridges rsa_id=8FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF2E "
     "bridge_addr=24.1.1.1:443 sampled_on=2016-11-25T06:44:14 "
-    "sampled_idx=0 "
     "sampled_by=0.3.0.0-alpha-dev listed=1 "
     "confirmed_on=2016-11-29T10:36:06 confirmed_idx=0 "
     "pb_circ_attempts=8.000000 pb_circ_successes=8.000000 "
     "pb_successful_circuits_closed=13.000000\n"
   "Guard in=bridges rsa_id=5800000000000000000000000000000000000000 "
     "bridge_addr=37.218.246.143:28366 "
-    "sampled_on=2016-11-18T15:07:34 sampled_idx=1 "
-    "sampled_by=0.3.0.0-alpha-dev listed=1\n";
+    "sampled_on=2016-11-18T15:07:34 sampled_by=0.3.0.0-alpha-dev listed=1\n";
 
   config_line_t *lines = NULL;
   or_state_t *state = tor_malloc_zero(sizeof(or_state_t));
@@ -740,42 +703,35 @@ test_entry_guard_parse_from_state_full(void *arg)
   tt_str_op(joined, OP_EQ,
   "Guard in=default rsa_id=052900AB0EA3ED54BAB84AE8A99E74E8693CE2B2 "
     "nickname=5OfNovember sampled_on=2016-11-20T04:32:05 "
-    "sampled_idx=0 "
     "sampled_by=0.3.0.0-alpha-dev "
     "listed=1 confirmed_on=2016-11-22T08:13:28 confirmed_idx=0 "
     "pb_circ_attempts=4.000000 pb_circ_successes=2.000000 "
     "pb_successful_circuits_closed=2.000000\n"
   "Guard in=default rsa_id=7B700C0C207EBD0002E00F499BE265519AC3C25A "
     "nickname=dc6jgk11 sampled_on=2016-11-28T11:50:13 "
-    "sampled_idx=1 "
     "sampled_by=0.3.0.0-alpha-dev "
     "listed=1 confirmed_on=2016-11-24T08:45:30 confirmed_idx=1 "
     "pb_circ_attempts=5.000000 pb_circ_successes=5.000000 "
     "pb_successful_circuits_closed=5.000000\n"
   "Guard in=default rsa_id=E9025AD60D86875D5F11548D536CC6AF60F0EF5E "
     "nickname=maibrunn sampled_on=2016-11-25T22:36:38 "
-    "sampled_idx=2 "
     "sampled_by=0.3.0.0-alpha-dev listed=1\n"
   "Guard in=default rsa_id=DCD30B90BA3A792DA75DC54A327EF353FB84C38E "
     "nickname=Unnamed sampled_on=2016-11-25T14:34:00 "
-    "sampled_idx=3 "
     "sampled_by=0.3.0.0-alpha-dev listed=1\n"
   "Guard in=wobblesome rsa_id=7B700C0C207EBD0002E00F499BE265519AC3C25A "
     "nickname=dc6jgk11 sampled_on=2016-11-28T11:50:13 "
-    "sampled_idx=0 "
     "sampled_by=0.3.0.0-alpha-dev "
     "listed=1\n"
   "Guard in=bridges rsa_id=8FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF2E "
     "bridge_addr=24.1.1.1:443 sampled_on=2016-11-25T06:44:14 "
-    "sampled_idx=0 "
     "sampled_by=0.3.0.0-alpha-dev listed=1 "
     "confirmed_on=2016-11-29T10:36:06 confirmed_idx=0 "
     "pb_circ_attempts=8.000000 pb_circ_successes=8.000000 "
     "pb_successful_circuits_closed=13.000000\n"
   "Guard in=bridges rsa_id=5800000000000000000000000000000000000000 "
     "bridge_addr=37.218.246.143:28366 "
-    "sampled_on=2016-11-18T15:07:34 sampled_idx=1 "
-    "sampled_by=0.3.0.0-alpha-dev listed=1\n");
+    "sampled_on=2016-11-18T15:07:34 sampled_by=0.3.0.0-alpha-dev listed=1\n");
 
  done:
   config_free_lines(lines);
@@ -1002,10 +958,10 @@ test_entry_guard_node_filter(void *arg)
   g[1]->pb.path_bias_disabled = 1;
 
   /* 2: Unreachable address. */
-  tor_addr_make_unspec(&n[2]->rs->ipv4_addr);
+  n[2]->rs->addr = 0;
 
   /* 3: ExcludeNodes */
-  tor_addr_from_ipv4h(&n[3]->rs->ipv4_addr, 0x90902020);
+  n[3]->rs->addr = 0x90902020;
   routerset_free(get_options_mutable()->ExcludeNodes);
   get_options_mutable()->ExcludeNodes = routerset_new();
   routerset_parse(get_options_mutable()->ExcludeNodes, "144.144.0.0/16", "");
@@ -1014,8 +970,8 @@ test_entry_guard_node_filter(void *arg)
   get_options_mutable()->UseBridges = 1;
   sweep_bridge_list();
   bl = tor_malloc_zero(sizeof(bridge_line_t));
-  tor_addr_copy(&bl->addr, &n[4]->rs->ipv4_addr);
-  bl->port = n[4]->rs->ipv4_orport;
+  tor_addr_from_ipv4h(&bl->addr, n[4]->rs->addr);
+  bl->port = n[4]->rs->or_port;
   memcpy(bl->digest, n[4]->identity, 20);
   bridge_add_from_config(bl);
   bl = NULL; // prevent free.
@@ -1124,7 +1080,7 @@ test_entry_guard_expand_sample(void *arg)
   routerset_parse(get_options_mutable()->ExcludeNodes, "144.144.0.0/16", "");
   SMARTLIST_FOREACH(big_fake_net_nodes, node_t *, n, {
     if (n_sl_idx % 64 != 0) {
-      tor_addr_from_ipv4h(&n->rs->ipv4_addr, 0x90903030);
+      n->rs->addr = 0x90903030;
     }
   });
   entry_guards_update_filtered_sets(gs);
@@ -1162,7 +1118,7 @@ test_entry_guard_expand_sample_small_net(void *arg)
       test_node_free(n);
       SMARTLIST_DEL_CURRENT(big_fake_net_nodes, n);
     } else {
-      tor_addr_make_unspec(&n->rs->ipv4_addr); // make the filter reject this.
+      n->rs->addr = 0; // make the filter reject this.
     }
   });
 
@@ -1479,8 +1435,8 @@ test_entry_guard_confirming_guards(void *arg)
   tt_i64_op(g1->confirmed_on_date, OP_EQ, start+10);
   tt_i64_op(g2->confirmed_on_date, OP_EQ, start);
   tt_i64_op(g3->confirmed_on_date, OP_EQ, start+10);
-  tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 0), OP_EQ, g1);
-  tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 1), OP_EQ, g2);
+  tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 0), OP_EQ, g2);
+  tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 1), OP_EQ, g1);
   tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 2), OP_EQ, g3);
 
   /* Now make sure we can regenerate the confirmed_entry_guards list. */
@@ -1492,8 +1448,8 @@ test_entry_guard_confirming_guards(void *arg)
   tt_int_op(g1->confirmed_idx, OP_EQ, 1);
   tt_int_op(g2->confirmed_idx, OP_EQ, 0);
   tt_int_op(g3->confirmed_idx, OP_EQ, 2);
-  tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 0), OP_EQ, g1);
-  tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 1), OP_EQ, g2);
+  tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 0), OP_EQ, g2);
+  tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 1), OP_EQ, g1);
   tt_ptr_op(smartlist_get(gs->confirmed_entry_guards, 2), OP_EQ, g3);
 
   /* Now make sure we can regenerate the confirmed_entry_guards list if
@@ -1510,9 +1466,9 @@ test_entry_guard_confirming_guards(void *arg)
   g1 = smartlist_get(gs->confirmed_entry_guards, 0);
   g2 = smartlist_get(gs->confirmed_entry_guards, 1);
   g3 = smartlist_get(gs->confirmed_entry_guards, 2);
-  tt_int_op(g1->sampled_idx, OP_EQ, 0);
-  tt_int_op(g2->sampled_idx, OP_EQ, 1);
-  tt_int_op(g3->sampled_idx, OP_EQ, 8);
+  tt_int_op(g1->confirmed_idx, OP_EQ, 0);
+  tt_int_op(g2->confirmed_idx, OP_EQ, 1);
+  tt_int_op(g3->confirmed_idx, OP_EQ, 2);
   tt_assert(g1 != g2);
   tt_assert(g1 != g3);
   tt_assert(g2 != g3);
@@ -1528,6 +1484,9 @@ test_entry_guard_sample_reachable_filtered(void *arg)
   (void)arg;
   guard_selection_t *gs = guard_selection_new("default", GS_TYPE_NORMAL);
   entry_guards_expand_sample(gs);
+  const int N = 10000;
+  bitarray_t *selected = NULL;
+  int i, j;
 
   /* We've got a sampled list now; let's make one non-usable-filtered; some
    * confirmed, some primary, some pending.
@@ -1562,21 +1521,32 @@ test_entry_guard_sample_reachable_filtered(void *arg)
     { SAMPLE_EXCLUDE_PENDING, 0 },
     { -1, -1},
   };
-  int j;
+
   for (j = 0; tests[j].flag >= 0; ++j) {
+    selected = bitarray_init_zero(n_guards);
     const int excluded_flags = tests[j].flag;
     const int excluded_idx = tests[j].idx;
-    g = first_reachable_filtered_entry_guard(gs, NULL, excluded_flags);
-    tor_assert(g);
-    int pos = smartlist_pos(gs->sampled_entry_guards, g);
-    tt_int_op(smartlist_len(gs->sampled_entry_guards), OP_EQ, n_guards);
-    const int should_be_set = (pos != excluded_idx &&
-                                 pos != 3); // filtered out.
-    tt_int_op(1, OP_EQ, should_be_set);
+    for (i = 0; i < N; ++i) {
+      g = sample_reachable_filtered_entry_guards(gs, NULL, excluded_flags);
+      tor_assert(g);
+      int pos = smartlist_pos(gs->sampled_entry_guards, g);
+      tt_int_op(smartlist_len(gs->sampled_entry_guards), OP_EQ, n_guards);
+      tt_int_op(pos, OP_GE, 0);
+      tt_int_op(pos, OP_LT, n_guards);
+      bitarray_set(selected, pos);
+    }
+    for (i = 0; i < n_guards; ++i) {
+      const int should_be_set = (i != excluded_idx &&
+                                 i != 3); // filtered out.
+      tt_int_op(!!bitarray_is_set(selected, i), OP_EQ, should_be_set);
+    }
+    bitarray_free(selected);
+    selected = NULL;
   }
 
  done:
   guard_selection_free(gs);
+  bitarray_free(selected);
 }
 
 static void
@@ -1588,7 +1558,7 @@ test_entry_guard_sample_reachable_filtered_empty(void *arg)
   SMARTLIST_FOREACH(big_fake_net_nodes, node_t *, n,
                     n->is_possible_guard = 0);
 
-  entry_guard_t *g = first_reachable_filtered_entry_guard(gs, NULL, 0);
+  entry_guard_t *g = sample_reachable_filtered_entry_guards(gs, NULL, 0);
   tt_ptr_op(g, OP_EQ, NULL);
 
  done:
@@ -1679,13 +1649,10 @@ test_entry_guard_manage_primary(void *arg)
     tt_ptr_op(g, OP_EQ, smartlist_get(prev_guards, g_sl_idx));
   });
 
-  /**
-   * If we have one confirmed guard, that guards becomes the first primary
-   * only if its sampled_idx is smaller
-   * */
+  /* If we have one confirmed guard, that guards becomes the first primary
+   * guard, and the other primary guards get kept. */
 
-  /* find a non-primary guard... it should have a sampled_idx higher than
-   * existing primary guards */
+  /* find a non-primary guard... */
   entry_guard_t *confirmed = NULL;
   SMARTLIST_FOREACH(gs->sampled_entry_guards, entry_guard_t *, g, {
     if (! g->is_primary) {
@@ -1701,13 +1668,15 @@ test_entry_guard_manage_primary(void *arg)
   smartlist_add_all(prev_guards, gs->primary_entry_guards);
   entry_guards_update_primary(gs);
 
-  /* the confirmed guard should be at the end of the primary list! Hopefully,
-   * one of the primary guards with a lower sampled_idx will confirm soon :)
-   * Doing this won't make the client switches between primaries depending on
-   * the order of confirming events */
+  /*  and see what's primary now! */
   tt_int_op(smartlist_len(gs->primary_entry_guards), OP_EQ, n_primary);
-  tt_ptr_op(smartlist_get(gs->primary_entry_guards,
-        smartlist_len(gs->primary_entry_guards)-1), OP_EQ, confirmed);
+  tt_ptr_op(smartlist_get(gs->primary_entry_guards, 0), OP_EQ, confirmed);
+  SMARTLIST_FOREACH(gs->primary_entry_guards, entry_guard_t *, g, {
+    tt_assert(g->is_primary);
+    if (g_sl_idx == 0)
+      continue;
+    tt_ptr_op(g, OP_EQ, smartlist_get(prev_guards, g_sl_idx - 1));
+  });
   {
     entry_guard_t *prev_last_guard = smartlist_get(prev_guards, n_primary-1);
     tt_assert(! prev_last_guard->is_primary);
@@ -1739,8 +1708,7 @@ test_entry_guard_manage_primary(void *arg)
     dir_info_str =guard_selection_get_err_str_if_dir_info_missing(gs, 1, 2, 3);
     tt_str_op(dir_info_str, OP_EQ,
               "We're missing descriptors for 1/2 of our primary entry guards "
-              "(total microdescriptors: 2/3). That's ok. We will try to fetch "
-              "missing descriptors soon.");
+              "(total microdescriptors: 2/3).");
     tor_free(dir_info_str);
   }
 
@@ -1795,57 +1763,6 @@ test_entry_guard_guard_preferred(void *arg)
  done:
   tor_free(g1);
   tor_free(g2);
-}
-
-static void
-test_entry_guard_correct_cascading_order(void *arg)
-{
-  (void)arg;
-  smartlist_t *old_primary_guards = smartlist_new();
-  guard_selection_t *gs = guard_selection_new("default", GS_TYPE_NORMAL);
-  entry_guards_expand_sample(gs);
-  /** First, a test in which the primary guards need be pulled from different
-   * lists to fill up the primary list -- this may happen, if for example, not
-   * enough guards have confirmed yet */
-  entry_guard_t *g;
-  /** just one confirmed */
-  g = smartlist_get(gs->sampled_entry_guards, 2);
-  make_guard_confirmed(gs, g);
-  entry_guards_update_primary(gs);
-  g = smartlist_get(gs->primary_entry_guards, 0);
-  tt_int_op(g->sampled_idx, OP_EQ, 0);
-  g = smartlist_get(gs->primary_entry_guards, 1);
-  tt_int_op(g->sampled_idx, OP_EQ, 1);
-  g = smartlist_get(gs->primary_entry_guards, 2);
-  tt_int_op(g->sampled_idx, OP_EQ, 2);
-
-  /** Now the primaries get all confirmed, and the primary list should not
-   * change */
-  make_guard_confirmed(gs, smartlist_get(gs->primary_entry_guards, 0));
-  make_guard_confirmed(gs, smartlist_get(gs->primary_entry_guards, 1));
-  smartlist_add_all(old_primary_guards, gs->primary_entry_guards);
-  entry_guards_update_primary(gs);
-  smartlist_ptrs_eq(gs->primary_entry_guards, old_primary_guards);
-  /** the confirmed guards should also have the same set of guards, in the same
-   * order :-) */
-  smartlist_ptrs_eq(gs->confirmed_entry_guards, gs->primary_entry_guards);
-  /** Now select a guard for a circuit, and make sure it is the first primary
-   * guard */
-  unsigned state = 9999;
-  g = select_entry_guard_for_circuit(gs, GUARD_USAGE_TRAFFIC, NULL, &state);
-  tt_ptr_op(g, OP_EQ, smartlist_get(gs->primary_entry_guards, 0));
-  /** Now, let's mark this guard as unreachable and let's update the lists */
-  g->is_reachable = GUARD_REACHABLE_NO;
-  g->failing_since = approx_time() - 10;
-  g->last_tried_to_connect = approx_time() - 10;
-  state = 9999;
-  entry_guards_update_primary(gs);
-  g = select_entry_guard_for_circuit(gs, GUARD_USAGE_TRAFFIC, NULL, &state);
-  /** we should have switched to the next one is sampled order */
-  tt_int_op(g->sampled_idx, OP_EQ, 1);
- done:
-  smartlist_free(old_primary_guards);
-  guard_selection_free(gs);
 }
 
 static void
@@ -2774,7 +2691,7 @@ test_entry_guard_upgrade_not_blocked_by_worse_circ_pending(void *arg)
 }
 
 static void
-test_entry_guard_should_expire_waiting(void *arg)
+test_enty_guard_should_expire_waiting(void *arg)
 {
   (void)arg;
   circuit_guard_state_t *fake_state = tor_malloc_zero(sizeof(*fake_state));
@@ -2915,16 +2832,13 @@ test_entry_guard_outdated_dirserver_exclusion(void *arg)
                                   digests, 3, 7, 0);
 
     /* ... and check that because we failed to fetch microdescs from all our
-     * primaries, we didn't end up selecting a primary for fetching dir info */
+     * primaries, we didnt end up selecting a primary for fetching dir info */
     expect_log_msg_containing("No primary or confirmed guards available.");
     teardown_capture_of_logs();
   }
 
  done:
-  UNMOCK(networkstatus_get_latest_consensus_by_flavor);
-  UNMOCK(directory_initiate_request);
   smartlist_free(digests);
-  tor_free(mock_ns_val);
   tor_free(args);
   if (conn) {
     tor_free(conn->requested_resource);
@@ -3095,48 +3009,39 @@ static const struct testcase_setup_t upgrade_circuits = {
   upgrade_circuits_setup, upgrade_circuits_cleanup
 };
 
-#ifndef COCCI
-#define NO_PREFIX_TEST(name) \
-  { #name, test_ ## name, 0, NULL, NULL }
-
-#define EN_TEST_BASE(name, fork, setup, arg) \
-  { #name, test_entry_guard_ ## name, fork, setup, (void*)(arg) }
-
-#define EN_TEST(name)      EN_TEST_BASE(name, 0,       NULL, NULL)
-#define EN_TEST_FORK(name) EN_TEST_BASE(name, TT_FORK, NULL, NULL)
-
 #define BFN_TEST(name) \
-  EN_TEST_BASE(name, TT_FORK, &big_fake_network, NULL), \
-  { #name "_reasonably_future", test_entry_guard_ ## name, TT_FORK, \
-    &big_fake_network, (void*)(REASONABLY_FUTURE) }, \
-  { #name "_reasonably_past", test_entry_guard_ ## name, TT_FORK, \
-    &big_fake_network, (void*)(REASONABLY_PAST) }
+  { #name, test_entry_guard_ ## name, TT_FORK, &big_fake_network, NULL }
 
-#define UPGRADE_TEST(name, arg) \
-  EN_TEST_BASE(name, TT_FORK, &upgrade_circuits, arg), \
-  { #name "_reasonably_future", test_entry_guard_ ## name, TT_FORK, \
-    &upgrade_circuits, (void*)(arg REASONABLY_FUTURE) }, \
-  { #name "_reasonably_past", test_entry_guard_ ## name, TT_FORK, \
-    &upgrade_circuits, (void*)(arg REASONABLY_PAST) }
-#endif /* !defined(COCCI) */
+#define UPGRADE_TEST(name, arg)                                         \
+  { #name, test_entry_guard_ ## name, TT_FORK, &upgrade_circuits,       \
+      (void*)(arg) }
 
 struct testcase_t entrynodes_tests[] = {
-  NO_PREFIX_TEST(node_preferred_orport),
-  NO_PREFIX_TEST(entry_guard_describe),
-
-  EN_TEST(randomize_time),
-  EN_TEST(encode_for_state_minimal),
-  EN_TEST(encode_for_state_maximal),
-  EN_TEST(parse_from_state_minimal),
-  EN_TEST(parse_from_state_maximal),
-  EN_TEST(parse_from_state_failure),
-  EN_TEST(parse_from_state_partial_failure),
-
-  EN_TEST_FORK(parse_from_state_full),
-  EN_TEST_FORK(parse_from_state_broken),
-  EN_TEST_FORK(get_guard_selection_by_name),
-  EN_TEST_FORK(number_of_primaries),
-
+  { "node_preferred_orport",
+    test_node_preferred_orport,
+    0, NULL, NULL },
+  { "entry_guard_describe", test_entry_guard_describe, 0, NULL, NULL },
+  { "randomize_time", test_entry_guard_randomize_time, 0, NULL, NULL },
+  { "encode_for_state_minimal",
+    test_entry_guard_encode_for_state_minimal, 0, NULL, NULL },
+  { "encode_for_state_maximal",
+    test_entry_guard_encode_for_state_maximal, 0, NULL, NULL },
+  { "parse_from_state_minimal",
+    test_entry_guard_parse_from_state_minimal, 0, NULL, NULL },
+  { "parse_from_state_maximal",
+    test_entry_guard_parse_from_state_maximal, 0, NULL, NULL },
+  { "parse_from_state_failure",
+    test_entry_guard_parse_from_state_failure, 0, NULL, NULL },
+  { "parse_from_state_partial_failure",
+    test_entry_guard_parse_from_state_partial_failure, 0, NULL, NULL },
+  { "parse_from_state_full",
+    test_entry_guard_parse_from_state_full, TT_FORK, NULL, NULL },
+  { "parse_from_state_broken",
+    test_entry_guard_parse_from_state_broken, TT_FORK, NULL, NULL },
+  { "get_guard_selection_by_name",
+    test_entry_guard_get_guard_selection_by_name, TT_FORK, NULL, NULL },
+  { "number_of_primaries",
+    test_entry_guard_number_of_primaries, TT_FORK, NULL, NULL },
   BFN_TEST(choose_selection_initial),
   BFN_TEST(add_single_guard),
   BFN_TEST(node_filter),
@@ -3150,10 +3055,7 @@ struct testcase_t entrynodes_tests[] = {
   BFN_TEST(sample_reachable_filtered_empty),
   BFN_TEST(retry_unreachable),
   BFN_TEST(manage_primary),
-  BFN_TEST(correct_cascading_order),
-
-  EN_TEST_FORK(guard_preferred),
-
+  { "guard_preferred", test_entry_guard_guard_preferred, TT_FORK, NULL, NULL },
   BFN_TEST(select_for_circuit_no_confirmed),
   BFN_TEST(select_for_circuit_confirmed),
   BFN_TEST(select_for_circuit_highlevel_primary),
@@ -3176,8 +3078,8 @@ struct testcase_t entrynodes_tests[] = {
   UPGRADE_TEST(upgrade_not_blocked_by_restricted_circ_pending,
                "c2-done"),
   UPGRADE_TEST(upgrade_not_blocked_by_worse_circ_pending, "c1-done"),
-
-  EN_TEST_FORK(should_expire_waiting),
+  { "should_expire_waiting", test_enty_guard_should_expire_waiting, TT_FORK,
+    NULL, NULL },
 
   END_OF_TESTCASES
 };

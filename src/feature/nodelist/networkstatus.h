@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -16,10 +16,7 @@
 
 void networkstatus_reset_warnings(void);
 void networkstatus_reset_download_failures(void);
-MOCK_DECL(char *,networkstatus_get_cache_fname,(int flav,
-                                                const char *flavorname,
-                                                int unverified_consensus));
-tor_mmap_t *networkstatus_map_cached_consensus(const char *flavorname);
+char *networkstatus_read_cached_consensus(const char *flavorname);
 int router_reload_consensus_networkstatus(void);
 void routerstatus_free_(routerstatus_t *rs);
 #define routerstatus_free(rs) \
@@ -43,9 +40,8 @@ int compare_digest_to_routerstatus_entry(const void *_key,
                                          const void **_member);
 int compare_digest_to_vote_routerstatus_entry(const void *_key,
                                               const void **_member);
-MOCK_DECL(const routerstatus_t *,networkstatus_vote_find_entry,(
-                                              networkstatus_t *ns,
-                                              const char *digest));
+const routerstatus_t *networkstatus_vote_find_entry(networkstatus_t *ns,
+                                              const char *digest);
 routerstatus_t *networkstatus_vote_find_mutable_entry(networkstatus_t *ns,
                                               const char *digest);
 int networkstatus_vote_find_entry_idx(networkstatus_t *ns,
@@ -91,19 +87,17 @@ MOCK_DECL(networkstatus_t *, networkstatus_get_live_consensus,(time_t now));
 int networkstatus_is_live(const networkstatus_t *ns, time_t now);
 int networkstatus_consensus_reasonably_live(const networkstatus_t *consensus,
                                             time_t now);
-int networkstatus_valid_after_is_reasonably_live(time_t valid_after,
-                                                 time_t now);
 int networkstatus_valid_until_is_reasonably_live(time_t valid_until,
                                                  time_t now);
-MOCK_DECL(networkstatus_t *,networkstatus_get_reasonably_live_consensus,
-                                                        (time_t now,
-                                                         int flavor));
+networkstatus_t *networkstatus_get_reasonably_live_consensus(time_t now,
+                                                             int flavor);
 MOCK_DECL(int, networkstatus_consensus_is_bootstrapping,(time_t now));
 int networkstatus_consensus_can_use_multiple_directories(
                                                 const or_options_t *options);
 MOCK_DECL(int, networkstatus_consensus_can_use_extra_fallbacks,(
                                                 const or_options_t *options));
 int networkstatus_consensus_is_already_downloading(const char *resource);
+int networkstatus_consensus_has_ipv6(const or_options_t* options);
 
 #define NSSET_FROM_CACHE 1
 #define NSSET_WAS_WAITING_FOR_CERTS 2
@@ -111,7 +105,6 @@ int networkstatus_consensus_is_already_downloading(const char *resource);
 #define NSSET_ACCEPT_OBSOLETE 8
 #define NSSET_REQUIRE_FLAVOR 16
 int networkstatus_set_current_consensus(const char *consensus,
-                                        size_t consensus_len,
                                         const char *flavor,
                                         unsigned flags,
                                         const char *source_dir);
@@ -124,6 +117,7 @@ void signed_descs_update_status_from_consensus_networkstatus(
 
 char *networkstatus_getinfo_helper_single(const routerstatus_t *rs);
 char *networkstatus_getinfo_by_purpose(const char *purpose_string, time_t now);
+void networkstatus_dump_bridge_status_to_file(time_t now);
 MOCK_DECL(int32_t, networkstatus_get_param,
           (const networkstatus_t *ns, const char *param_name,
            int32_t default_val, int32_t min_val, int32_t max_val));
@@ -150,13 +144,6 @@ void vote_routerstatus_free_(vote_routerstatus_t *rs);
 #define vote_routerstatus_free(rs) \
   FREE_AND_NULL(vote_routerstatus_t, vote_routerstatus_free_, (rs))
 
-void set_routerstatus_from_routerinfo(routerstatus_t *rs,
-                                      const node_t *node,
-                                      const routerinfo_t *ri);
-time_t voting_sched_get_start_of_interval_after(time_t now,
-                                                  int interval,
-                                                  int offset);
-
 #ifdef NETWORKSTATUS_PRIVATE
 #ifdef TOR_UNIT_TESTS
 STATIC int networkstatus_set_current_consensus_from_ns(networkstatus_t *c,
@@ -166,8 +153,7 @@ STATIC void warn_early_consensus(const networkstatus_t *c, const char *flavor,
 extern networkstatus_t *current_ns_consensus;
 extern networkstatus_t *current_md_consensus;
 #endif /* defined(TOR_UNIT_TESTS) */
-STATIC int routerstatus_has_visibly_changed(const routerstatus_t *a,
-                                    const routerstatus_t *b);
 #endif /* defined(NETWORKSTATUS_PRIVATE) */
 
 #endif /* !defined(TOR_NETWORKSTATUS_H) */
+

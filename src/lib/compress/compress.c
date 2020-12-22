@@ -1,6 +1,6 @@
 /* Copyright (c) 2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -29,12 +29,10 @@
 #include "lib/compress/compress.h"
 #include "lib/compress/compress_lzma.h"
 #include "lib/compress/compress_none.h"
-#include "lib/compress/compress_sys.h"
 #include "lib/compress/compress_zlib.h"
 #include "lib/compress/compress_zstd.h"
 #include "lib/intmath/cmp.h"
 #include "lib/malloc/malloc.h"
-#include "lib/subsys/subsys.h"
 #include "lib/thread/threads.h"
 
 /** Total number of bytes allocated for compression state overhead. */
@@ -662,7 +660,7 @@ tor_compress_state_size(const tor_compress_state_t *state)
 }
 
 /** Initialize all compression modules. */
-int
+void
 tor_compress_init(void)
 {
   atomic_counter_init(&total_compress_allocation);
@@ -670,8 +668,6 @@ tor_compress_init(void)
   tor_zlib_init();
   tor_lzma_init();
   tor_zstd_init();
-
-  return 0;
 }
 
 /** Warn if we had any problems while setting up our compression libraries.
@@ -681,21 +677,5 @@ tor_compress_init(void)
 void
 tor_compress_log_init_warnings(void)
 {
-  // XXXX can we move this into tor_compress_init() after all?  log.c queues
-  // XXXX log messages at startup.
   tor_zstd_warn_if_version_mismatched();
 }
-
-static int
-subsys_compress_initialize(void)
-{
-  return tor_compress_init();
-}
-
-const subsys_fns_t sys_compress = {
-  .name = "compress",
-  SUBSYS_DECLARE_LOCATION(),
-  .supported = true,
-  .level = -55,
-  .initialize = subsys_compress_initialize,
-};

@@ -1,4 +1,4 @@
-all: test.exe bench.exe
+all: test.exe test-child.exe bench.exe
 
 CFLAGS = /I ..\win32 /I ..\..\..\build-alpha\include /I ..\common /I ..\or \
     /I ..\ext
@@ -19,7 +19,6 @@ TEST_OBJECTS = test.obj test_addr.obj test_channel.obj test_channeltls.obj \
 	test_cell_formats.obj test_relay.obj test_replay.obj \
 	test_channelpadding.obj \
 	test_circuitstats.obj \
-	test_circuitpadding.obj \
 	test_scheduler.obj test_introduce.obj test_hs.obj tinytest.obj
 
 tinytest.obj: ..\ext\tinytest.c
@@ -31,5 +30,8 @@ test.exe: $(TEST_OBJECTS)
 bench.exe: bench.obj
 	$(CC) $(CFLAGS) bench.obj $(LIBS) ..\common\*.lib /Fe$@
 
+test-child.exe: test-child.obj
+	$(CC) $(CFLAGS) test-child.obj /Fe$@
+
 clean:
-	del *.obj *.lib test.exe bench.exe
+	del *.obj *.lib test.exe bench.exe test-child.exe

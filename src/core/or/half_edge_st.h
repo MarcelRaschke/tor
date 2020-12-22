@@ -1,13 +1,8 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
-
-/**
- * @file half_edge_st.h
- * @brief Half-open connection structure.
- **/
 
 #ifndef HALF_EDGE_ST_H
 #define HALF_EDGE_ST_H
@@ -35,4 +30,5 @@ typedef struct half_edge_t {
   int connected_pending : 1;
 } half_edge_t;
 
-#endif /* !defined(HALF_EDGE_ST_H) */
+#endif
+

@@ -1,6 +1,6 @@
 /* Copyright (c) 2003-2004, Roger Dingledine
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -20,10 +20,7 @@ const void *tor_memmem(const void *haystack, size_t hlen, const void *needle,
                        size_t nlen);
 const void *tor_memstr(const void *haystack, size_t hlen,
                        const char *needle);
-int fast_mem_is_zero(const char *mem, size_t len);
-#define fast_digest_is_zero(d) fast_mem_is_zero((d), DIGEST_LEN)
-#define fast_digetst256_is_zero(d) fast_mem_is_zero((d), DIGEST256_LEN)
-
+int tor_mem_is_zero(const char *mem, size_t len);
 int tor_digest_is_zero(const char *digest);
 int tor_digest256_is_zero(const char *digest);
 
@@ -31,12 +28,12 @@ int tor_digest256_is_zero(const char *digest);
 #define HEX_CHARACTERS "0123456789ABCDEFabcdef"
 void tor_strlower(char *s);
 void tor_strupper(char *s);
-void tor_strreplacechar(char *s, char find, char replacement);
 int tor_strisprint(const char *s);
 int tor_strisnonupper(const char *s);
 int tor_strisspace(const char *s);
 int strcmp_opt(const char *s1, const char *s2);
 int strcmpstart(const char *s1, const char *s2);
+int strcmp_len(const char *s1, const char *s2, size_t len);
 int strcasecmpstart(const char *s1, const char *s2);
 int strcmpend(const char *s1, const char *s2);
 int strcasecmpend(const char *s1, const char *s2);
@@ -56,6 +53,5 @@ const char *find_str_at_start_of_line(const char *haystack,
 int string_is_C_identifier(const char *string);
 
 int string_is_utf8(const char *str, size_t len);
-int string_is_utf8_no_bom(const char *str, size_t len);
 
 #endif /* !defined(TOR_UTIL_STRING_H) */

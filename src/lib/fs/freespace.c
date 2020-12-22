@@ -1,6 +1,6 @@
 /* Copyright (c) 2003-2004, Roger Dingledine
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -19,7 +19,6 @@
 #include <windows.h>
 #endif
 
-#include <errno.h>
 #include <string.h>
 
 /** Return the amount of free disk space we have permission to use, in

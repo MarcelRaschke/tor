@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2020, The Tor Project, Inc. */
+/* Copyright (c) 2014-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #include "orconfig.h"
@@ -46,11 +46,13 @@
 #include "feature/nodelist/routerstatus_st.h"
 
 #include "lib/encoding/confline.h"
-#include "lib/buf/buffers.h"
+#include "lib/container/buffers.h"
 
 #include "test/test.h"
 #include "test/test_dir_common.h"
 #include "test/log_test_helpers.h"
+
+void construct_consensus(char **consensus_text_md, time_t now);
 
 static authority_cert_t *mock_cert;
 
@@ -148,7 +150,7 @@ test_routerlist_launch_descriptor_downloads(void *arg)
   smartlist_free(downloadable);
 }
 
-static void
+void
 construct_consensus(char **consensus_text_md, time_t now)
 {
   networkstatus_t *vote = NULL;
@@ -263,9 +265,7 @@ test_router_pick_directory_server_impl(void *arg)
 
   /* Init SR subsystem. */
   MOCK(get_my_v3_authority_cert, get_my_v3_authority_cert_m);
-  mock_cert = authority_cert_parse_from_string(AUTHORITY_CERT_1,
-                                               strlen(AUTHORITY_CERT_1),
-                                               NULL);
+  mock_cert = authority_cert_parse_from_string(AUTHORITY_CERT_1, NULL);
   sr_init(0);
   UNMOCK(get_my_v3_authority_cert);
 
@@ -275,9 +275,7 @@ test_router_pick_directory_server_impl(void *arg)
 
   construct_consensus(&consensus_text_md, now);
   tt_assert(consensus_text_md);
-  con_md = networkstatus_parse_vote_from_string(consensus_text_md,
-                                                strlen(consensus_text_md),
-                                                NULL,
+  con_md = networkstatus_parse_vote_from_string(consensus_text_md, NULL,
                                                 NS_TYPE_CONSENSUS);
   tt_assert(con_md);
   tt_int_op(con_md->flavor,OP_EQ, FLAV_MICRODESC);
@@ -303,6 +301,7 @@ test_router_pick_directory_server_impl(void *arg)
   tt_assert(!networkstatus_consensus_is_bootstrapping(con_md->valid_until
                                                       + 24*60*60));
   /* These times are outside the test validity period */
+  tt_assert(networkstatus_consensus_is_bootstrapping(now));
   tt_assert(networkstatus_consensus_is_bootstrapping(now + 2*24*60*60));
   tt_assert(networkstatus_consensus_is_bootstrapping(now - 2*24*60*60));
 
@@ -339,18 +338,18 @@ test_router_pick_directory_server_impl(void *arg)
 
   node_router1->rs->is_v2_dir = 0;
   node_router3->rs->is_v2_dir = 0;
-  tmp_dirport1 = node_router1->rs->ipv4_dirport;
-  tmp_dirport3 = node_router3->rs->ipv4_dirport;
-  node_router1->rs->ipv4_dirport = 0;
-  node_router3->rs->ipv4_dirport = 0;
+  tmp_dirport1 = node_router1->rs->dir_port;
+  tmp_dirport3 = node_router3->rs->dir_port;
+  node_router1->rs->dir_port = 0;
+  node_router3->rs->dir_port = 0;
   rs = router_pick_directory_server_impl(V3_DIRINFO, flags, NULL);
   tt_ptr_op(rs, OP_NE, NULL);
   tt_assert(tor_memeq(rs->identity_digest, router2_id, DIGEST_LEN));
   rs = NULL;
   node_router1->rs->is_v2_dir = 1;
   node_router3->rs->is_v2_dir = 1;
-  node_router1->rs->ipv4_dirport = tmp_dirport1;
-  node_router3->rs->ipv4_dirport = tmp_dirport3;
+  node_router1->rs->dir_port = tmp_dirport1;
+  node_router3->rs->dir_port = tmp_dirport3;
 
   node_router1->is_valid = 0;
   node_router3->is_valid = 0;
@@ -379,23 +378,23 @@ test_router_pick_directory_server_impl(void *arg)
   options->ReachableORAddresses = policy_line;
   policies_parse_from_options(options);
 
-  node_router1->rs->ipv4_orport = 444;
-  node_router2->rs->ipv4_orport = 443;
-  node_router3->rs->ipv4_orport = 442;
+  node_router1->rs->or_port = 444;
+  node_router2->rs->or_port = 443;
+  node_router3->rs->or_port = 442;
   rs = router_pick_directory_server_impl(V3_DIRINFO, flags, NULL);
   tt_ptr_op(rs, OP_NE, NULL);
   tt_assert(tor_memeq(rs->identity_digest, router3_id, DIGEST_LEN));
-  node_router1->rs->ipv4_orport = 442;
-  node_router2->rs->ipv4_orport = 443;
-  node_router3->rs->ipv4_orport = 444;
+  node_router1->rs->or_port = 442;
+  node_router2->rs->or_port = 443;
+  node_router3->rs->or_port = 444;
   rs = router_pick_directory_server_impl(V3_DIRINFO, flags, NULL);
   tt_ptr_op(rs, OP_NE, NULL);
   tt_assert(tor_memeq(rs->identity_digest, router1_id, DIGEST_LEN));
 
   /* Fascist firewall and overloaded */
-  node_router1->rs->ipv4_orport = 442;
-  node_router2->rs->ipv4_orport = 443;
-  node_router3->rs->ipv4_orport = 442;
+  node_router1->rs->or_port = 442;
+  node_router2->rs->or_port = 443;
+  node_router3->rs->or_port = 442;
   node_router3->rs->last_dir_503_at = now;
   rs = router_pick_directory_server_impl(V3_DIRINFO, flags, NULL);
   tt_ptr_op(rs, OP_NE, NULL);
@@ -408,12 +407,12 @@ test_router_pick_directory_server_impl(void *arg)
   policy_line->value = tor_strdup("accept *:80, reject *:*");
   options->ReachableDirAddresses = policy_line;
   policies_parse_from_options(options);
-  node_router1->rs->ipv4_orport = 442;
-  node_router2->rs->ipv4_orport = 441;
-  node_router3->rs->ipv4_orport = 443;
-  node_router1->rs->ipv4_dirport = 80;
-  node_router2->rs->ipv4_dirport = 80;
-  node_router3->rs->ipv4_dirport = 81;
+  node_router1->rs->or_port = 442;
+  node_router2->rs->or_port = 441;
+  node_router3->rs->or_port = 443;
+  node_router1->rs->dir_port = 80;
+  node_router2->rs->dir_port = 80;
+  node_router3->rs->dir_port = 81;
   node_router1->rs->last_dir_503_at = now;
   rs = router_pick_directory_server_impl(V3_DIRINFO, flags, NULL);
   tt_ptr_op(rs, OP_NE, NULL);
@@ -476,9 +475,7 @@ test_directory_guard_fetch_with_no_dirinfo(void *arg)
 
   /* Initialize the SRV subsystem */
   MOCK(get_my_v3_authority_cert, get_my_v3_authority_cert_m);
-  mock_cert = authority_cert_parse_from_string(AUTHORITY_CERT_1,
-                                               strlen(AUTHORITY_CERT_1),
-                                               NULL);
+  mock_cert = authority_cert_parse_from_string(AUTHORITY_CERT_1, NULL);
   sr_init(0);
   UNMOCK(get_my_v3_authority_cert);
 
@@ -629,7 +626,7 @@ mock_clock_skew_warning(const connection_t *conn, long apparent_skew,
   (void)conn;
   mock_apparent_skew = apparent_skew;
   tt_int_op(trusted, OP_EQ, 1);
-  tt_i64_op(domain, OP_EQ, LD_GENERAL);
+  tt_int_op(domain, OP_EQ, LD_GENERAL);
   tt_str_op(received, OP_EQ, "microdesc flavor consensus");
   tt_str_op(source, OP_EQ, "CONSENSUS");
  done:
@@ -651,9 +648,7 @@ test_skew_common(void *arg, time_t now, unsigned long *offset)
 
   /* Initialize the SRV subsystem */
   MOCK(get_my_v3_authority_cert, get_my_v3_authority_cert_m);
-  mock_cert = authority_cert_parse_from_string(AUTHORITY_CERT_1,
-                                               strlen(AUTHORITY_CERT_1),
-                                               NULL);
+  mock_cert = authority_cert_parse_from_string(AUTHORITY_CERT_1, NULL);
   sr_init(0);
   UNMOCK(get_my_v3_authority_cert);
 
@@ -667,8 +662,7 @@ test_skew_common(void *arg, time_t now, unsigned long *offset)
   MOCK(clock_skew_warning, mock_clock_skew_warning);
   /* Caller will call teardown_capture_of_logs() */
   setup_capture_of_logs(LOG_WARN);
-  retval = networkstatus_set_current_consensus(consensus, strlen(consensus),
-                                               "microdesc", 0,
+  retval = networkstatus_set_current_consensus(consensus, "microdesc", 0,
                                                NULL);
 
  done:

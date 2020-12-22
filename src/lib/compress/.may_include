@@ -1,6 +1,5 @@
 orconfig.h
 lib/arch/*.h
-lib/buf/*.h
 lib/cc/*.h
 lib/compress/*.h
 lib/container/*.h
@@ -9,6 +8,5 @@ lib/intmath/*.h
 lib/log/*.h
 lib/malloc/*.h
 lib/string/*.h
-lib/subsys/*.h
 lib/testsupport/*.h
 lib/thread/*.h

@@ -1,4 +1,4 @@
-/* Copyright (c) 2014-2020, The Tor Project, Inc. */
+/* Copyright (c) 2014-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -188,7 +188,7 @@ load_ed_keys(const or_options_t *options, time_t now)
 
     /* Check/Create the key directory */
     if (create_keys_directory(options) < 0)
-      goto err;
+      return -1;
 
     char *fname;
     if (options->master_key_fname) {
@@ -226,7 +226,7 @@ load_ed_keys(const or_options_t *options, time_t now)
         tor_free(fname);
       }
     }
-    if (safe_mem_is_zero((char*)id->seckey.seckey, sizeof(id->seckey)))
+    if (tor_mem_is_zero((char*)id->seckey.seckey, sizeof(id->seckey)))
       sign_signing_key_with_id = NULL;
     else
       sign_signing_key_with_id = id;
@@ -387,10 +387,12 @@ generate_ed_link_cert(const or_options_t *options, time_t now,
     return 0;
   }
 
-  link_cert = tor_cert_create_raw(get_master_signing_keypair(),
+  ed25519_public_key_t dummy_key;
+  memcpy(dummy_key.pubkey, digests->d[DIGEST_SHA256], DIGEST256_LEN);
+
+  link_cert = tor_cert_create(get_master_signing_keypair(),
                               CERT_TYPE_SIGNING_LINK,
-                              SIGNED_KEY_TYPE_SHA256_OF_X509,
-                              (const uint8_t*)digests->d[DIGEST_SHA256],
+                              &dummy_key,
                               now,
                               options->TestingLinkCertLifetime, 0);
 
@@ -464,7 +466,7 @@ init_mock_ed_keys(const crypto_pk_t *rsa_identity_key)
   MAKEKEY(master_signing_key);
   MAKEKEY(current_auth_key);
 #define MAKECERT(cert, signing, signed_, type, flags)            \
-  cert = tor_cert_create_ed25519(signing,                        \
+  cert = tor_cert_create(signing,                                \
                          type,                                   \
                          &signed_->pubkey,                       \
                          time(NULL), 86400,                      \
@@ -517,33 +519,19 @@ print_cert_expiration(const char *expiration,
 
 /**
  * Log when a certificate, <b>cert</b>, with some <b>description</b> and
- * stored in a file named <b>fname</b>, is going to expire. Formats the expire
- * time according to <b>time_format</b>.
+ * stored in a file named <b>fname</b>, is going to expire.
  */
 static void
 log_ed_cert_expiration(const tor_cert_t *cert,
                        const char *description,
-                       const char *fname,
-                       key_expiration_format_t time_format) {
+                       const char *fname) {
+  char expiration[ISO_TIME_LEN+1];
+
   if (BUG(!cert)) { /* If the specified key hasn't been loaded */
     log_warn(LD_OR, "No %s key loaded; can't get certificate expiration.",
              description);
   } else {
-    char expiration[ISO_TIME_LEN+1];
-    switch (time_format) {
-      case KEY_EXPIRATION_FORMAT_ISO8601:
-        format_local_iso_time(expiration, cert->valid_until);
-        break;
-
-      case KEY_EXPIRATION_FORMAT_TIMESTAMP:
-        tor_snprintf(expiration, sizeof(expiration), "%"PRId64,
-                     (int64_t) cert->valid_until);
-        break;
-
-      default:
-        log_err(LD_BUG, "Unknown time format value: %d.", time_format);
-        return;
-    }
+    format_local_iso_time(expiration, cert->valid_until);
     log_notice(LD_OR, "The %s certificate stored in %s is valid until %s.",
                description, fname, expiration);
     print_cert_expiration(expiration, description);
@@ -579,8 +567,7 @@ log_master_signing_key_cert_expiration(const or_options_t *options)
 
   /* If we do have a signing key, log the expiration time. */
   if (signing_key) {
-    key_expiration_format_t time_format = options->key_expiration_format;
-    log_ed_cert_expiration(signing_key, "signing", fn, time_format);
+    log_ed_cert_expiration(signing_key, "signing", fn);
   } else {
     log_warn(LD_OR, "Could not load signing key certificate from %s, so " \
              "we couldn't learn anything about certificate expiration.", fn);
@@ -644,14 +631,14 @@ get_master_identity_keypair(void)
 }
 #endif /* defined(TOR_UNIT_TESTS) */
 
-MOCK_IMPL(const ed25519_keypair_t *,
-get_master_signing_keypair,(void))
+const ed25519_keypair_t *
+get_master_signing_keypair(void)
 {
   return master_signing_key;
 }
 
-MOCK_IMPL(const struct tor_cert_st *,
-get_master_signing_key_cert,(void))
+const struct tor_cert_st *
+get_master_signing_key_cert(void)
 {
   return signing_key_cert;
 }
@@ -697,8 +684,8 @@ make_ntor_onion_key_crosscert(const curve25519_keypair_t *onion_key,
                                               onion_key) < 0)
     goto end;
 
-  cert = tor_cert_create_ed25519(&ed_onion_key, CERT_TYPE_ONION_ID,
-                                  master_id_key, now, lifetime, 0);
+  cert = tor_cert_create(&ed_onion_key, CERT_TYPE_ONION_ID, master_id_key,
+      now, lifetime, 0);
 
  end:
   memwipe(&ed_onion_key, 0, sizeof(ed_onion_key));
@@ -719,8 +706,6 @@ make_tap_onion_key_crosscert(const crypto_pk_t *onion_key,
 
   *len_out = 0;
   if (crypto_pk_get_digest(rsa_id_key, (char*)signed_data) < 0) {
-    log_info(LD_OR, "crypto_pk_get_digest failed in "
-                    "make_tap_onion_key_crosscert!");
     return NULL;
   }
   memcpy(signed_data + DIGEST_LEN, master_id_key->pubkey, ED25519_PUBKEY_LEN);
@@ -728,12 +713,8 @@ make_tap_onion_key_crosscert(const crypto_pk_t *onion_key,
   int r = crypto_pk_private_sign(onion_key,
                                (char*)signature, sizeof(signature),
                                (const char*)signed_data, sizeof(signed_data));
-  if (r < 0) {
-    /* It's probably missing the private key */
-    log_info(LD_OR, "crypto_pk_private_sign failed in "
-                    "make_tap_onion_key_crosscert!");
+  if (r < 0)
     return NULL;
-  }
 
   *len_out = r;
 

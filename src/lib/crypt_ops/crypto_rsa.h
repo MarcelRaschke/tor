@@ -1,7 +1,7 @@
 /* Copyright (c) 2001, Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -61,8 +61,6 @@ int crypto_pk_read_public_key_from_string(crypto_pk_t *env,
                                           const char *src, size_t len);
 int crypto_pk_read_private_key_from_string(crypto_pk_t *env,
                                            const char *s, ssize_t len);
-int crypto_pk_read_private_key1024_from_string(crypto_pk_t *env,
-                                               const char *src, ssize_t len);
 int crypto_pk_write_private_key_to_filename(crypto_pk_t *env,
                                             const char *fname);
 
@@ -97,8 +95,7 @@ int crypto_pk_asn1_encode(const crypto_pk_t *pk, char *dest, size_t dest_len);
 crypto_pk_t *crypto_pk_asn1_decode(const char *str, size_t len);
 int crypto_pk_asn1_encode_private(const crypto_pk_t *pk,
                                   char *dest, size_t dest_len);
-crypto_pk_t *crypto_pk_asn1_decode_private(const char *str, size_t len,
-                                           int max_bits);
+crypto_pk_t *crypto_pk_asn1_decode_private(const char *str, size_t len);
 int crypto_pk_get_fingerprint(crypto_pk_t *pk, char *fp_out,int add_space);
 int crypto_pk_get_hashed_fingerprint(crypto_pk_t *pk, char *fp_out);
 void crypto_add_spaces_to_fp(char *out, size_t outlen, const char *in);
@@ -122,7 +119,7 @@ struct rsa_st *crypto_pk_get_openssl_rsa_(crypto_pk_t *env);
 crypto_pk_t *crypto_new_pk_from_openssl_rsa_(struct rsa_st *rsa);
 MOCK_DECL(struct evp_pkey_st *, crypto_pk_get_openssl_evp_pkey_,(
                                  crypto_pk_t *env,int private));
-#endif /* defined(ENABLE_OPENSSL) */
+#endif
 
 #ifdef ENABLE_NSS
 struct SECKEYPublicKeyStr;
@@ -132,7 +129,7 @@ const struct SECKEYPublicKeyStr *crypto_pk_get_nss_pubkey(
                                            const crypto_pk_t *key);
 const struct SECKEYPrivateKeyStr *crypto_pk_get_nss_privkey(
                                            const crypto_pk_t *key);
-#endif /* defined(ENABLE_NSS) */
+#endif
 
 void crypto_pk_assign_public(crypto_pk_t *dest, const crypto_pk_t *src);
 void crypto_pk_assign_private(crypto_pk_t *dest, const crypto_pk_t *src);
@@ -143,6 +140,6 @@ struct SECItemStr;
 STATIC int secitem_uint_cmp(const struct SECItemStr *a,
                             const struct SECItemStr *b);
 #endif
-#endif /* defined(TOR_UNIT_TESTS) */
+#endif
 
-#endif /* !defined(TOR_CRYPTO_RSA_H) */
+#endif

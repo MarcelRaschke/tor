@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2020, The Tor Project, Inc. */
+/* Copyright (c) 2017-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -6,7 +6,6 @@
  * \brief Test hidden service common functionalities.
  */
 
-#define CONNECTION_EDGE_PRIVATE
 #define HS_COMMON_PRIVATE
 #define HS_CLIENT_PRIVATE
 #define HS_SERVICE_PRIVATE
@@ -32,7 +31,7 @@
 #include "app/config/statefile.h"
 #include "core/or/circuitlist.h"
 #include "feature/dirauth/shared_random.h"
-#include "feature/dirauth/voting_schedule.h"
+#include "feature/dircommon/voting_schedule.h"
 
 #include "feature/nodelist/microdesc_st.h"
 #include "feature/nodelist/networkstatus_st.h"
@@ -53,14 +52,14 @@ test_validate_address(void *arg)
   setup_full_capture_of_logs(LOG_WARN);
   ret = hs_address_is_valid("blah");
   tt_int_op(ret, OP_EQ, 0);
-  expect_log_msg_containing("Invalid length");
+  expect_log_msg_containing("has an invalid length");
   teardown_capture_of_logs();
 
   setup_full_capture_of_logs(LOG_WARN);
   ret = hs_address_is_valid(
            "p3xnclpu4mu22dwaurjtsybyqk4xfjmcfz6z62yl24uwmhjatiwnlnadb");
   tt_int_op(ret, OP_EQ, 0);
-  expect_log_msg_containing("Invalid length");
+  expect_log_msg_containing("has an invalid length");
   teardown_capture_of_logs();
 
   /* Invalid checksum (taken from prop224) */
@@ -83,7 +82,7 @@ test_validate_address(void *arg)
   ret = hs_address_is_valid(
            "????????????????????????????????????????????????????????");
   tt_int_op(ret, OP_EQ, 0);
-  expect_log_msg_containing("Unable to base32 decode");
+  expect_log_msg_containing("can't be decoded");
   teardown_capture_of_logs();
 
   /* Valid address. */
@@ -276,7 +275,7 @@ test_start_time_of_next_time_period(void *arg)
 static void
 cleanup_nodelist(void)
 {
-  const smartlist_t *nodelist = nodelist_get_list();
+  smartlist_t *nodelist = nodelist_get_list();
   SMARTLIST_FOREACH_BEGIN(nodelist, node_t *, node) {
     tor_free(node->md);
     node->md = NULL;
@@ -293,6 +292,7 @@ helper_add_hsdir_to_networkstatus(networkstatus_t *ns,
   routerstatus_t *rs = tor_malloc_zero(sizeof(routerstatus_t));
   routerinfo_t *ri = tor_malloc_zero(sizeof(routerinfo_t));
   uint8_t identity[DIGEST_LEN];
+  tor_addr_t ipv4_addr;
   node_t *node = NULL;
 
   memset(identity, identity_idx, sizeof(identity));
@@ -301,8 +301,9 @@ helper_add_hsdir_to_networkstatus(networkstatus_t *ns,
   rs->is_hs_dir = is_hsdir;
   rs->pv.supports_v3_hsdir = 1;
   strlcpy(rs->nickname, nickname, sizeof(rs->nickname));
-  tor_addr_parse(&ri->ipv4_addr, "1.2.3.4");
-  tor_addr_parse(&rs->ipv4_addr, "1.2.3.4");
+  tor_addr_parse(&ipv4_addr, "1.2.3.4");
+  ri->addr = tor_addr_to_ipv4h(&ipv4_addr);
+  rs->addr = tor_addr_to_ipv4h(&ipv4_addr);
   ri->nickname = tor_strdup(nickname);
   ri->protocol_list = tor_strdup("HSDir=1-2 LinkAuth=3");
   memcpy(ri->cache_info.identity_digest, identity, DIGEST_LEN);
@@ -482,7 +483,7 @@ test_desc_reupload_logic(void *arg)
    *  1) Upload descriptor to HSDirs
    *     CHECK that previous_hsdirs list was populated.
    *  2) Then call router_dir_info_changed() without an HSDir set change.
-   *     CHECK that no reupload occurs.
+   *     CHECK that no reuplod occurs.
    *  3) Now change the HSDir set, and call dir_info_changed() again.
    *     CHECK that reupload occurs.
    *  4) Finally call service_desc_schedule_upload().
@@ -501,7 +502,6 @@ test_desc_reupload_logic(void *arg)
                 pubkey_hex, strlen(pubkey_hex));
   hs_build_address(&pubkey, HS_VERSION_THREE, onion_addr);
   service = tor_malloc_zero(sizeof(hs_service_t));
-  tt_assert(service);
   memcpy(service->onion_address, onion_addr, sizeof(service->onion_address));
   ed25519_secret_key_generate(&service->keys.identity_sk, 0);
   ed25519_public_key_generate(&service->keys.identity_pk,
@@ -603,10 +603,6 @@ test_desc_reupload_logic(void *arg)
   SMARTLIST_FOREACH(ns->routerstatus_list,
                     routerstatus_t *, rs, routerstatus_free(rs));
   smartlist_clear(ns->routerstatus_list);
-  if (service) {
-    remove_service(get_hs_service_map(), service);
-    hs_service_free(service);
-  }
   networkstatus_vote_free(ns);
   cleanup_nodelist();
   hs_free_all();
@@ -634,7 +630,7 @@ test_disaster_srv(void *arg)
   get_disaster_srv(1, srv_one);
   get_disaster_srv(2, srv_two);
 
-  /* Check that the cached ones were updated */
+  /* Check that the cached ones where updated */
   tt_mem_op(cached_disaster_srv_one, OP_EQ, srv_one, DIGEST256_LEN);
   tt_mem_op(cached_disaster_srv_two, OP_EQ, srv_two, DIGEST256_LEN);
 
@@ -777,7 +773,6 @@ static void
 test_parse_extended_hostname(void *arg)
 {
   (void) arg;
-  hostname_type_t type;
 
   char address1[] = "fooaddress.onion";
   char address2[] = "aaaaaaaaaaaaaaaa.onion";
@@ -788,47 +783,20 @@ test_parse_extended_hostname(void *arg)
   char address7[] = ".abcdefghijklmnop.onion";
   char address8[] =
     "www.25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkenl5sid.onion";
-  char address9[] =
-    "www.15njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkenl5sid.onion";
-  char address10[] =
-    "15njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkenl5sid7jdl.onion";
 
-  tt_assert(!parse_extended_hostname(address1, &type));
-  tt_int_op(type, OP_EQ, BAD_HOSTNAME);
-
-  tt_assert(parse_extended_hostname(address2, &type));
-  tt_int_op(type, OP_EQ, ONION_V2_HOSTNAME);
-  tt_str_op(address2, OP_EQ, "aaaaaaaaaaaaaaaa");
-
-  tt_assert(parse_extended_hostname(address3, &type));
-  tt_int_op(type, OP_EQ, EXIT_HOSTNAME);
-
-  tt_assert(parse_extended_hostname(address4, &type));
-  tt_int_op(type, OP_EQ, NORMAL_HOSTNAME);
-
-  tt_assert(parse_extended_hostname(address5, &type));
-  tt_int_op(type, OP_EQ, ONION_V2_HOSTNAME);
-  tt_str_op(address5, OP_EQ, "abcdefghijklmnop");
-
-  tt_assert(parse_extended_hostname(address6, &type));
-  tt_int_op(type, OP_EQ, ONION_V2_HOSTNAME);
-  tt_str_op(address6, OP_EQ, "abcdefghijklmnop");
-
-  tt_assert(!parse_extended_hostname(address7, &type));
-  tt_int_op(type, OP_EQ, BAD_HOSTNAME);
-
-  tt_assert(parse_extended_hostname(address8, &type));
-  tt_int_op(type, OP_EQ, ONION_V3_HOSTNAME);
+  tt_assert(BAD_HOSTNAME == parse_extended_hostname(address1));
+  tt_assert(ONION_V2_HOSTNAME == parse_extended_hostname(address2));
+  tt_str_op(address2,OP_EQ, "aaaaaaaaaaaaaaaa");
+  tt_assert(EXIT_HOSTNAME == parse_extended_hostname(address3));
+  tt_assert(NORMAL_HOSTNAME == parse_extended_hostname(address4));
+  tt_assert(ONION_V2_HOSTNAME == parse_extended_hostname(address5));
+  tt_str_op(address5,OP_EQ, "abcdefghijklmnop");
+  tt_assert(ONION_V2_HOSTNAME == parse_extended_hostname(address6));
+  tt_str_op(address6,OP_EQ, "abcdefghijklmnop");
+  tt_assert(BAD_HOSTNAME == parse_extended_hostname(address7));
+  tt_assert(ONION_V3_HOSTNAME == parse_extended_hostname(address8));
   tt_str_op(address8, OP_EQ,
             "25njqamcweflpvkl73j4szahhihoc4xt3ktcgjnpaingr5yhkenl5sid");
-
-  /* Invalid v3 address. */
-  tt_assert(!parse_extended_hostname(address9, &type));
-  tt_int_op(type, OP_EQ, BAD_HOSTNAME);
-
-  /* Invalid v3 address: too long */
-  tt_assert(!parse_extended_hostname(address10, &type));
-  tt_int_op(type, OP_EQ, BAD_HOSTNAME);
 
  done: ;
 }
@@ -857,7 +825,7 @@ test_time_between_tp_and_srv(void *arg)
   tt_int_op(ret, OP_EQ, 0);
   ret = parse_rfc1123_time("Sat, 26 Oct 1985 01:00:00 UTC", &ns.fresh_until);
   tt_int_op(ret, OP_EQ, 0);
-  dirauth_sched_recalculate_timing(get_options(), ns.valid_after);
+  voting_schedule_recalculate_timing(get_options(), ns.valid_after);
   ret = hs_in_period_between_tp_and_srv(&ns, 0);
   tt_int_op(ret, OP_EQ, 0);
 
@@ -865,7 +833,7 @@ test_time_between_tp_and_srv(void *arg)
   tt_int_op(ret, OP_EQ, 0);
   ret = parse_rfc1123_time("Sat, 26 Oct 1985 12:00:00 UTC", &ns.fresh_until);
   tt_int_op(ret, OP_EQ, 0);
-  dirauth_sched_recalculate_timing(get_options(), ns.valid_after);
+  voting_schedule_recalculate_timing(get_options(), ns.valid_after);
   ret = hs_in_period_between_tp_and_srv(&ns, 0);
   tt_int_op(ret, OP_EQ, 0);
 
@@ -873,7 +841,7 @@ test_time_between_tp_and_srv(void *arg)
   tt_int_op(ret, OP_EQ, 0);
   ret = parse_rfc1123_time("Sat, 26 Oct 1985 13:00:00 UTC", &ns.fresh_until);
   tt_int_op(ret, OP_EQ, 0);
-  dirauth_sched_recalculate_timing(get_options(), ns.valid_after);
+  voting_schedule_recalculate_timing(get_options(), ns.valid_after);
   ret = hs_in_period_between_tp_and_srv(&ns, 0);
   tt_int_op(ret, OP_EQ, 1);
 
@@ -881,7 +849,7 @@ test_time_between_tp_and_srv(void *arg)
   tt_int_op(ret, OP_EQ, 0);
   ret = parse_rfc1123_time("Sat, 27 Oct 1985 00:00:00 UTC", &ns.fresh_until);
   tt_int_op(ret, OP_EQ, 0);
-  dirauth_sched_recalculate_timing(get_options(), ns.valid_after);
+  voting_schedule_recalculate_timing(get_options(), ns.valid_after);
   ret = hs_in_period_between_tp_and_srv(&ns, 0);
   tt_int_op(ret, OP_EQ, 1);
 
@@ -889,7 +857,7 @@ test_time_between_tp_and_srv(void *arg)
   tt_int_op(ret, OP_EQ, 0);
   ret = parse_rfc1123_time("Sat, 27 Oct 1985 01:00:00 UTC", &ns.fresh_until);
   tt_int_op(ret, OP_EQ, 0);
-  dirauth_sched_recalculate_timing(get_options(), ns.valid_after);
+  voting_schedule_recalculate_timing(get_options(), ns.valid_after);
   ret = hs_in_period_between_tp_and_srv(&ns, 0);
   tt_int_op(ret, OP_EQ, 0);
 
@@ -1376,7 +1344,7 @@ run_reachability_scenario(const reachability_cfg_t *cfg, int num_scenario)
                       &mock_service_ns->valid_until);
   set_consensus_times(cfg->service_valid_until,
                       &mock_service_ns->fresh_until);
-  dirauth_sched_recalculate_timing(get_options(),
+  voting_schedule_recalculate_timing(get_options(),
                                      mock_service_ns->valid_after);
   /* Check that service is in the right time period point */
   tt_int_op(hs_in_period_between_tp_and_srv(mock_service_ns, 0), OP_EQ,
@@ -1389,7 +1357,7 @@ run_reachability_scenario(const reachability_cfg_t *cfg, int num_scenario)
                       &mock_client_ns->valid_until);
   set_consensus_times(cfg->client_valid_until,
                       &mock_client_ns->fresh_until);
-  dirauth_sched_recalculate_timing(get_options(),
+  voting_schedule_recalculate_timing(get_options(),
                                      mock_client_ns->valid_after);
   /* Check that client is in the right time period point */
   tt_int_op(hs_in_period_between_tp_and_srv(mock_client_ns, 0), OP_EQ,
@@ -1612,7 +1580,7 @@ helper_set_consensus_and_system_time(networkstatus_t *ns, int position)
   } else {
     tt_assert(0);
   }
-  dirauth_sched_recalculate_timing(get_options(), ns->valid_after);
+  voting_schedule_recalculate_timing(get_options(), ns->valid_after);
 
   /* Set system time: pretend to be just 2 minutes before consensus expiry */
   real_time = ns->valid_until - 120;

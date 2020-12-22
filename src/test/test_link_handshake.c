@@ -1,11 +1,11 @@
-/* Copyright (c) 2014-2020, The Tor Project, Inc. */
+/* Copyright (c) 2014-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #include "orconfig.h"
 
 #define CHANNELTLS_PRIVATE
 #define CONNECTION_PRIVATE
-#define CHANNEL_OBJECT_PRIVATE
+#define TOR_CHANNEL_INTERNAL_
 #define TORTLS_PRIVATE
 
 #include "core/or/or.h"
@@ -18,7 +18,6 @@
 #include "feature/relay/routerkeys.h"
 #include "core/or/scheduler.h"
 #include "feature/nodelist/torcert.h"
-#include "feature/relay/relay_handshake.h"
 
 #include "core/or/or_connection_st.h"
 #include "core/or/or_handshake_certs_st.h"
@@ -264,7 +263,7 @@ test_link_handshake_certs_ok(void *arg)
     tt_assert(c1->handshake_state->authenticated_rsa);
     tt_assert(! c1->handshake_state->authenticated_ed25519);
   }
-  tt_assert(! fast_mem_is_zero(
+  tt_assert(! tor_mem_is_zero(
                 (char*)c1->handshake_state->authenticated_rsa_peer_id, 20));
 
   chan2 = tor_malloc_zero(sizeof(*chan2));
@@ -291,7 +290,7 @@ test_link_handshake_certs_ok(void *arg)
     tt_ptr_op(c2->handshake_state->certs->ed_id_sign, OP_EQ, NULL);
   }
   tt_assert(c2->handshake_state->certs->id_cert);
-  tt_assert(fast_mem_is_zero(
+  tt_assert(tor_mem_is_zero(
               (char*)c2->handshake_state->authenticated_rsa_peer_id, 20));
   /* no authentication has happened yet, since we haen't gotten an AUTH cell.
    */
@@ -326,7 +325,7 @@ test_link_handshake_certs_ok(void *arg)
   crypto_pk_free(key2);
 }
 
-typedef struct certs_data_t {
+typedef struct certs_data_s {
   int is_ed;
   int is_link_cert;
   or_connection_t *c;
@@ -710,7 +709,7 @@ CERTS_FAIL(missing_signing_key, /* ed25519 */
      * signing key. */
     const ed25519_keypair_t *mk = get_master_identity_keypair();
     const ed25519_keypair_t *sk = get_master_signing_keypair();
-    tor_cert_t *bad_cert = tor_cert_create_ed25519(mk, CERT_TYPE_ID_SIGNING,
+    tor_cert_t *bad_cert = tor_cert_create(mk, CERT_TYPE_ID_SIGNING,
                                            &sk->pubkey, time(NULL), 86400,
                                            0 /* don't include signer */);
     certs_cell_cert_setlen_body(cert, bad_cert->encoded_len);
@@ -949,7 +948,7 @@ test_link_handshake_send_authchallenge(void *arg)
 #else
   tt_int_op(36, OP_EQ, cell1->payload_len);
   tt_int_op(36, OP_EQ, cell2->payload_len);
-#endif /* defined(HAVE_WORKING_TOR_TLS_GET_TLSSECRETS) */
+#endif
   tt_int_op(0, OP_EQ, cell1->circ_id);
   tt_int_op(0, OP_EQ, cell2->circ_id);
   tt_int_op(CELL_AUTH_CHALLENGE, OP_EQ, cell1->command);
@@ -961,7 +960,7 @@ test_link_handshake_send_authchallenge(void *arg)
 #else
   tt_mem_op("\x00\x01\x00\x03", OP_EQ, cell1->payload + 32, 4);
   tt_mem_op("\x00\x01\x00\x03", OP_EQ, cell2->payload + 32, 4);
-#endif /* defined(HAVE_WORKING_TOR_TLS_GET_TLSSECRETS) */
+#endif
   tt_mem_op(cell1->payload, OP_NE, cell2->payload, 32);
 
  done:
@@ -973,7 +972,7 @@ test_link_handshake_send_authchallenge(void *arg)
   crypto_pk_free(rsa1);
 }
 
-typedef struct authchallenge_data_t {
+typedef struct authchallenge_data_s {
   or_connection_t *c;
   channel_tls_t *chan;
   var_cell_t *cell;
@@ -1172,7 +1171,7 @@ mock_set_circid_type(channel_t *chan,
   (void) consider_identity;
 }
 
-typedef struct authenticate_data_t {
+typedef struct authenticate_data_s {
   int is_ed;
   or_connection_t *c1, *c2;
   channel_tls_t *chan2;
@@ -1493,7 +1492,6 @@ AUTHENTICATE_FAIL(missing_ed_auth,
                     "authentication certificate";
                 })
 
-#ifndef COCCI
 #define TEST_RSA(name, flags)                                           \
   { #name , test_link_handshake_ ## name, (flags),                      \
       &passthrough_setup, (void*)"RSA" }
@@ -1529,7 +1527,6 @@ AUTHENTICATE_FAIL(missing_ed_auth,
 #define TEST_AUTHENTICATE_ED(name)                                      \
   { "authenticate/" #name "_ed25519" , test_link_handshake_auth_ ## name, \
       TT_FORK, &setup_authenticate, (void*)3 }
-#endif /* !defined(COCCI) */
 
 struct testcase_t link_handshake_tests[] = {
   TEST_RSA(certs_ok, TT_FORK),

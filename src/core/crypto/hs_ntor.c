@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2020, The Tor Project, Inc. */
+/* Copyright (c) 2017-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /** \file hs_ntor.c
@@ -170,18 +170,19 @@ get_rendezvous1_key_material(const uint8_t *rend_secret_hs_input,
  * necessary key material, and return 0. */
 static void
 get_introduce1_key_material(const uint8_t *secret_input,
-                        const hs_subcredential_t *subcredential,
+                        const uint8_t *subcredential,
                         hs_ntor_intro_cell_keys_t *hs_ntor_intro_cell_keys_out)
 {
   uint8_t keystream[CIPHER256_KEY_LEN + DIGEST256_LEN];
   uint8_t info_blob[INFO_BLOB_LEN];
   uint8_t kdf_input[KDF_INPUT_LEN];
+  crypto_xof_t *xof;
   uint8_t *ptr;
 
   /* Let's build info */
   ptr = info_blob;
   APPEND(ptr, M_HSEXPAND, strlen(M_HSEXPAND));
-  APPEND(ptr, subcredential->subcred, SUBCRED_LEN);
+  APPEND(ptr, subcredential, DIGEST256_LEN);
   tor_assert(ptr == info_blob + sizeof(info_blob));
 
   /* Let's build the input to the KDF */
@@ -192,8 +193,10 @@ get_introduce1_key_material(const uint8_t *secret_input,
   tor_assert(ptr == kdf_input + sizeof(kdf_input));
 
   /* Now we need to run kdf_input over SHAKE-256 */
-  crypto_xof(keystream, sizeof(keystream),
-             kdf_input, sizeof(kdf_input));
+  xof = crypto_xof_new();
+  crypto_xof_add_bytes(xof, kdf_input, sizeof(kdf_input));
+  crypto_xof_squeeze_bytes(xof, keystream, sizeof(keystream)) ;
+  crypto_xof_free(xof);
 
   { /* Get the keys */
     memcpy(&hs_ntor_intro_cell_keys_out->enc_key, keystream,CIPHER256_KEY_LEN);
@@ -317,7 +320,7 @@ hs_ntor_client_get_introduce1_keys(
                       const ed25519_public_key_t *intro_auth_pubkey,
                       const curve25519_public_key_t *intro_enc_pubkey,
                       const curve25519_keypair_t *client_ephemeral_enc_keypair,
-                      const hs_subcredential_t *subcredential,
+                      const uint8_t *subcredential,
                       hs_ntor_intro_cell_keys_t *hs_ntor_intro_cell_keys_out)
 {
   int bad = 0;
@@ -450,30 +453,8 @@ hs_ntor_service_get_introduce1_keys(
                     const ed25519_public_key_t *intro_auth_pubkey,
                     const curve25519_keypair_t *intro_enc_keypair,
                     const curve25519_public_key_t *client_ephemeral_enc_pubkey,
-                    const hs_subcredential_t *subcredential,
+                    const uint8_t *subcredential,
                     hs_ntor_intro_cell_keys_t *hs_ntor_intro_cell_keys_out)
-{
-  return hs_ntor_service_get_introduce1_keys_multi(
-                             intro_auth_pubkey,
-                             intro_enc_keypair,
-                             client_ephemeral_enc_pubkey,
-                             1,
-                             subcredential,
-                             hs_ntor_intro_cell_keys_out);
-}
-
-/**
- * As hs_ntor_service_get_introduce1_keys(), but take multiple subcredentials
- * as input, and yield multiple sets of keys as output.
- **/
-int
-hs_ntor_service_get_introduce1_keys_multi(
-            const struct ed25519_public_key_t *intro_auth_pubkey,
-            const struct curve25519_keypair_t *intro_enc_keypair,
-            const struct curve25519_public_key_t *client_ephemeral_enc_pubkey,
-            size_t n_subcredentials,
-            const hs_subcredential_t *subcredentials,
-            hs_ntor_intro_cell_keys_t *hs_ntor_intro_cell_keys_out)
 {
   int bad = 0;
   uint8_t secret_input[INTRO_SECRET_HS_INPUT_LEN];
@@ -482,8 +463,7 @@ hs_ntor_service_get_introduce1_keys_multi(
   tor_assert(intro_auth_pubkey);
   tor_assert(intro_enc_keypair);
   tor_assert(client_ephemeral_enc_pubkey);
-  tor_assert(n_subcredentials >= 1);
-  tor_assert(subcredentials);
+  tor_assert(subcredential);
   tor_assert(hs_ntor_intro_cell_keys_out);
 
   /* Compute EXP(X, b) */
@@ -499,16 +479,13 @@ hs_ntor_service_get_introduce1_keys_multi(
                             secret_input);
   bad |= safe_mem_is_zero(secret_input, CURVE25519_OUTPUT_LEN);
 
-  for (unsigned i = 0; i < n_subcredentials; ++i) {
-    /* Get ENC_KEY and MAC_KEY! */
-    get_introduce1_key_material(secret_input, &subcredentials[i],
-                                &hs_ntor_intro_cell_keys_out[i]);
-  }
+  /* Get ENC_KEY and MAC_KEY! */
+  get_introduce1_key_material(secret_input, subcredential,
+                              hs_ntor_intro_cell_keys_out);
 
   memwipe(secret_input,  0, sizeof(secret_input));
   if (bad) {
-    memwipe(hs_ntor_intro_cell_keys_out, 0,
-            sizeof(hs_ntor_intro_cell_keys_t) * n_subcredentials);
+    memwipe(hs_ntor_intro_cell_keys_out, 0, sizeof(hs_ntor_intro_cell_keys_t));
   }
 
   return bad ? -1 : 0;
@@ -617,6 +594,7 @@ hs_ntor_circuit_key_expansion(const uint8_t *ntor_key_seed, size_t seed_len,
 {
   uint8_t *ptr;
   uint8_t kdf_input[NTOR_KEY_EXPANSION_KDF_INPUT_LEN];
+  crypto_xof_t *xof;
 
   /* Sanity checks on lengths to make sure we are good */
   if (BUG(seed_len != DIGEST256_LEN)) {
@@ -633,8 +611,10 @@ hs_ntor_circuit_key_expansion(const uint8_t *ntor_key_seed, size_t seed_len,
   tor_assert(ptr == kdf_input + sizeof(kdf_input));
 
   /* Generate the keys */
-  crypto_xof(keys_out, HS_NTOR_KEY_EXPANSION_KDF_OUT_LEN,
-             kdf_input, sizeof(kdf_input));
+  xof = crypto_xof_new();
+  crypto_xof_add_bytes(xof, kdf_input, sizeof(kdf_input));
+  crypto_xof_squeeze_bytes(xof, keys_out, HS_NTOR_KEY_EXPANSION_KDF_OUT_LEN);
+  crypto_xof_free(xof);
 
   return 0;
 }

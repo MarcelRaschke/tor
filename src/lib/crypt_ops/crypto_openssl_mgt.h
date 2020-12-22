@@ -1,7 +1,7 @@
 /* Copyright (c) 2001, Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -16,7 +16,8 @@
 #include "orconfig.h"
 
 #ifdef ENABLE_OPENSSL
-#include <openssl/opensslv.h>
+#include <openssl/engine.h>
+
 /*
   Macro to create an arbitrary OpenSSL version number as used by
   OPENSSL_VERSION_NUMBER or SSLeay(), since the actual numbers are a bit hard
@@ -49,7 +50,7 @@
 #define OPENSSL_V_SERIES(a,b,c) \
   OPENSSL_VER((a),(b),(c),0,0)
 
-#ifdef OPENSSL_NO_ENGINE
+#ifdef ANDROID
 /* Android's OpenSSL seems to have removed all of its Engine support. */
 #define DISABLE_ENGINES
 #endif
@@ -57,7 +58,7 @@
 #if OPENSSL_VERSION_NUMBER >= OPENSSL_VER(1,1,0,0,5) && \
   !defined(LIBRESSL_VERSION_NUMBER)
 /* OpenSSL as of 1.1.0pre4 has an "new" thread API, which doesn't require
- * setting up various callbacks.
+ * seting up various callbacks.
  *
  * OpenSSL 1.1.0pre4 has a messed up `ERR_remove_thread_state()` prototype,
  * while the previous one was restored in pre5, and the function made a no-op
@@ -83,6 +84,6 @@ int crypto_openssl_late_init(int useAccel, const char *accelName,
 void crypto_openssl_thread_cleanup(void);
 void crypto_openssl_global_cleanup(void);
 
-#endif /* defined(ENABLE_OPENSSL) */
+#endif /* ENABLE_OPENSSL */
 
 #endif /* !defined(TOR_CRYPTO_OPENSSL_H) */

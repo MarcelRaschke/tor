@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Copyright 2012-2019, The Tor Project, Inc
+# Copyright 2012-2018, The Tor Project, Inc
 # See LICENSE for licensing information
 
 """
@@ -26,11 +26,6 @@ commands:
       src/test/test-ntor-cl; make sure we can.
 
 """
-
-# Future imports for Python 2.7, mandatory in 3.0
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
 
 import binascii
 try:
@@ -104,7 +99,7 @@ else:
    def int2byte(i):
       return bytes([i])
 
-def kdf_rfc5869(key, salt, info, n):
+def  kdf_rfc5869(key, salt, info, n):
 
     prk = HMAC(key=salt, msg=key)
 

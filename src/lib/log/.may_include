@@ -1,7 +1,6 @@
 orconfig.h
 
 lib/cc/*.h
-lib/defs/*.h
 lib/smartlist_core/*.h
 lib/err/*.h
 lib/fdio/*.h
@@ -10,7 +9,7 @@ lib/lock/*.h
 lib/log/*.h
 lib/malloc/*.h
 lib/string/*.h
-lib/subsys/*.h
 lib/testsupport/*.h
-lib/version/*.h
 lib/wallclock/*.h
+
+micro-revision.i

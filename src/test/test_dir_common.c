@@ -1,6 +1,6 @@
 /* Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #include "orconfig.h"
@@ -13,7 +13,7 @@
 #include "feature/dirparse/authcert_parse.h"
 #include "feature/dirparse/ns_parse.h"
 #include "test/test_dir_common.h"
-#include "feature/dirauth/voting_schedule.h"
+#include "feature/dircommon/voting_schedule.h"
 
 #include "feature/nodelist/authority_cert_st.h"
 #include "feature/nodelist/networkstatus_st.h"
@@ -42,20 +42,14 @@ dir_common_authority_pk_init(authority_cert_t **cert1,
 {
   /* Parse certificates and keys. */
   authority_cert_t *cert;
-  cert = authority_cert_parse_from_string(AUTHORITY_CERT_1,
-                                          strlen(AUTHORITY_CERT_1),
-                                          NULL);
+  cert = authority_cert_parse_from_string(AUTHORITY_CERT_1, NULL);
   tt_assert(cert);
   tt_assert(cert->identity_key);
   *cert1 = cert;
   tt_assert(*cert1);
-  *cert2 = authority_cert_parse_from_string(AUTHORITY_CERT_2,
-                                            strlen(AUTHORITY_CERT_2),
-                                            NULL);
+  *cert2 = authority_cert_parse_from_string(AUTHORITY_CERT_2, NULL);
   tt_assert(*cert2);
-  *cert3 = authority_cert_parse_from_string(AUTHORITY_CERT_3,
-                                            strlen(AUTHORITY_CERT_3),
-                                            NULL);
+  *cert3 = authority_cert_parse_from_string(AUTHORITY_CERT_3, NULL);
   tt_assert(*cert3);
   *sign_skey_1 = crypto_pk_new();
   *sign_skey_2 = crypto_pk_new();
@@ -97,14 +91,13 @@ dir_common_gen_routerstatus_for_v3ns(int idx, time_t now)
       strlcpy(rs->nickname, "router2", sizeof(rs->nickname));
       memset(rs->identity_digest, TEST_DIR_ROUTER_ID_1, DIGEST_LEN);
       memset(rs->descriptor_digest, TEST_DIR_ROUTER_DD_1, DIGEST_LEN);
-      tor_addr_from_ipv4h(&rs->ipv4_addr, 0x99008801);
-      rs->ipv4_orport = 443;
-      rs->ipv4_dirport = 8000;
+      rs->addr = 0x99008801;
+      rs->or_port = 443;
+      rs->dir_port = 8000;
       /* all flags but running and v2dir cleared */
       rs->is_flagged_running = 1;
       rs->is_v2_dir = 1;
       rs->is_valid = 1; /* xxxxx */
-      vrs->protocols = tor_strdup("Link=7 HSDir=3");
       break;
     case 1:
       /* Generate the second routerstatus. */
@@ -115,15 +108,14 @@ dir_common_gen_routerstatus_for_v3ns(int idx, time_t now)
       strlcpy(rs->nickname, "router1", sizeof(rs->nickname));
       memset(rs->identity_digest, TEST_DIR_ROUTER_ID_2, DIGEST_LEN);
       memset(rs->descriptor_digest, TEST_DIR_ROUTER_DD_2, DIGEST_LEN);
-      tor_addr_from_ipv4h(&rs->ipv4_addr, 0x99009901);
-      rs->ipv4_orport = 443;
-      rs->ipv4_dirport = 0;
+      rs->addr = 0x99009901;
+      rs->or_port = 443;
+      rs->dir_port = 0;
       tor_addr_parse(&addr_ipv6, "[1:2:3::4]");
       tor_addr_copy(&rs->ipv6_addr, &addr_ipv6);
       rs->ipv6_orport = 4711;
       rs->is_exit = rs->is_stable = rs->is_fast = rs->is_flagged_running =
         rs->is_valid = rs->is_possible_guard = rs->is_v2_dir = 1;
-      vrs->protocols = tor_strdup("Link=3,4 HSDir=2,3");
       break;
     case 2:
       /* Generate the third routerstatus. */
@@ -134,13 +126,12 @@ dir_common_gen_routerstatus_for_v3ns(int idx, time_t now)
       strlcpy(rs->nickname, "router3", sizeof(rs->nickname));
       memset(rs->identity_digest, TEST_DIR_ROUTER_ID_3, DIGEST_LEN);
       memset(rs->descriptor_digest, TEST_DIR_ROUTER_DD_3, DIGEST_LEN);
-      tor_addr_from_ipv4h(&rs->ipv4_addr, 0xAA009901);
-      rs->ipv4_orport = 400;
-      rs->ipv4_dirport = 9999;
+      rs->addr = 0xAA009901;
+      rs->or_port = 400;
+      rs->dir_port = 9999;
       rs->is_authority = rs->is_exit = rs->is_stable = rs->is_fast =
         rs->is_flagged_running = rs->is_valid = rs->is_v2_dir =
         rs->is_possible_guard = 1;
-      vrs->protocols = tor_strdup("Link=3,4 HSDir=2,3");
       break;
     case 3:
       /* Generate a fourth routerstatus that is not running. */
@@ -151,11 +142,10 @@ dir_common_gen_routerstatus_for_v3ns(int idx, time_t now)
       strlcpy(rs->nickname, "router4", sizeof(rs->nickname));
       memset(rs->identity_digest, TEST_DIR_ROUTER_ID_4, DIGEST_LEN);
       memset(rs->descriptor_digest, TEST_DIR_ROUTER_DD_4, DIGEST_LEN);
-      tor_addr_from_ipv4h(&rs->ipv4_addr, 0xC0000203);
-      rs->ipv4_orport = 500;
-      rs->ipv4_dirport = 1999;
+      rs->addr = 0xC0000203;
+      rs->or_port = 500;
+      rs->dir_port = 1999;
       rs->is_v2_dir = 1;
-      vrs->protocols = tor_strdup("Link=3,4 HSDir=3");
       /* Running flag (and others) cleared */
       break;
     case 4:
@@ -276,9 +266,7 @@ dir_common_add_rs_and_parse(networkstatus_t *vote, networkstatus_t **vote_out,
   /* dump the vote and try to parse it. */
   v_text = format_networkstatus_vote(sign_skey, vote);
   tt_assert(v_text);
-  *vote_out = networkstatus_parse_vote_from_string(v_text,
-                                                   strlen(v_text),
-                                                   NULL, NS_TYPE_VOTE);
+  *vote_out = networkstatus_parse_vote_from_string(v_text, NULL, NS_TYPE_VOTE);
 
  done:
   if (v_text)
@@ -317,9 +305,9 @@ dir_common_construct_vote_1(networkstatus_t **vote, authority_cert_t *cert,
   voter = tor_malloc_zero(sizeof(networkstatus_voter_info_t));
   voter->nickname = tor_strdup("Voter1");
   voter->address = tor_strdup("1.2.3.4");
-  tor_addr_from_ipv4h(&voter->ipv4_addr, 0x01020304);
-  voter->ipv4_dirport = 80;
-  voter->ipv4_orport = 9000;
+  voter->addr = 0x01020304;
+  voter->dir_port = 80;
+  voter->or_port = 9000;
   voter->contact = tor_strdup("voter@example.com");
   crypto_pk_get_digest(cert->identity_key, voter->identity_digest);
   /*
@@ -366,9 +354,9 @@ dir_common_construct_vote_2(networkstatus_t **vote, authority_cert_t *cert,
   voter = tor_malloc_zero(sizeof(networkstatus_voter_info_t));
   voter->nickname = tor_strdup("Voter2");
   voter->address = tor_strdup("2.3.4.5");
-  tor_addr_from_ipv4h(&voter->ipv4_addr, 0x02030405);
-  voter->ipv4_dirport = 80;
-  voter->ipv4_orport = 9000;
+  voter->addr = 0x02030405;
+  voter->dir_port = 80;
+  voter->or_port = 9000;
   voter->contact = tor_strdup("voter@example.com");
   crypto_pk_get_digest(cert->identity_key, voter->identity_digest);
   /*
@@ -416,9 +404,9 @@ dir_common_construct_vote_3(networkstatus_t **vote, authority_cert_t *cert,
   voter = tor_malloc_zero(sizeof(networkstatus_voter_info_t));
   voter->nickname = tor_strdup("Voter2");
   voter->address = tor_strdup("3.4.5.6");
-  tor_addr_from_ipv4h(&voter->ipv4_addr, 0x03040506);
-  voter->ipv4_dirport = 80;
-  voter->ipv4_orport = 9000;
+  voter->addr = 0x03040506;
+  voter->dir_port = 80;
+  voter->or_port = 9000;
   voter->contact = tor_strdup("voter@example.com");
   crypto_pk_get_digest(cert->identity_key, voter->identity_digest);
   memset(voter->legacy_id_digest, (int)'A', DIGEST_LEN);
@@ -436,3 +424,4 @@ dir_common_construct_vote_3(networkstatus_t **vote, authority_cert_t *cert,
 
   return 0;
 }
+

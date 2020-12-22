@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2020, The Tor Project, Inc. */
+/* Copyright (c) 2012-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -289,7 +289,7 @@ curve25519_basepoint_spot_check(void)
     0x0d,0xbf,0x3a,0x0d,0x26,0x38,0x1a,0xf4,
     0xeb,0xa4,0xa9,0x8e,0xaa,0x9b,0x4e,0x6a
   };
-  const int loop_max=8;
+  const int loop_max=200;
   int save_use_ed = curve25519_use_ed;
   unsigned char e1[32], e2[32];
   unsigned char x[32],y[32];

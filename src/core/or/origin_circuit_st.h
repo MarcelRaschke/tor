@@ -1,13 +1,8 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
-
-/**
- * @file origin_circuit_st.h
- * @brief Origin circuit structure.
- **/
 
 #ifndef ORIGIN_CIRCUIT_ST_H
 #define ORIGIN_CIRCUIT_ST_H
@@ -54,7 +49,7 @@ enum path_state_t {
     /** Did any SOCKS streams or hidserv introductions actually succeed on
       * this circuit?
       *
-      * If any streams detach/fail from this circuit, the code transitions
+      * If any streams detatch/fail from this circuit, the code transitions
       * the circuit back to PATH_STATE_USE_ATTEMPTED to ensure we probe. See
       * pathbias_mark_use_rollback() for that.
       */
@@ -165,10 +160,6 @@ struct origin_circuit_t {
   /* If this flag is set, we should not consider attaching any more
    * connections to this circuit. */
   unsigned int unusable_for_new_conns : 1;
-
-  /* If this flag is set (due to padding negotiation failure), we should
-   * not try to negotiate further circuit padding. */
-  unsigned padding_negotiation_failed : 1;
 
   /**
    * Tristate variable to guard against pathbias miscounting
@@ -300,4 +291,4 @@ struct origin_circuit_t {
 
 };
 
-#endif /* !defined(ORIGIN_CIRCUIT_ST_H) */
+#endif

@@ -1,7 +1,6 @@
 orconfig.h
 lib/arch/*.h
 lib/cc/*.h
-lib/conf/*.h
 lib/container/*.h
 lib/crypt_ops/*.h
 lib/ctime/*.h
@@ -13,16 +12,13 @@ lib/malloc/*.h
 lib/intmath/*.h
 lib/sandbox/*.h
 lib/string/*.h
-lib/subsys/*.h
-lib/testsupport/*.h
+lib/testsupport/testsupport.h
 lib/thread/*.h
 lib/log/*.h
-
-lib/crypt_ops/*.inc
 
 trunnel/pwbox.h
 
 keccak-tiny/*.h
 ed25519/*.h
 
-ext/siphash.h
+siphash.h

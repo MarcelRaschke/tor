@@ -1,13 +1,8 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
-
-/**
- * @file document_signature_st.h
- * @brief Authority signature structure
- **/
 
 #ifndef DOCUMENT_SIGNATURE_ST_H
 #define DOCUMENT_SIGNATURE_ST_H
@@ -30,4 +25,5 @@ struct document_signature_t {
                                      * as good. */
 };
 
-#endif /* !defined(DOCUMENT_SIGNATURE_ST_H) */
+#endif
+

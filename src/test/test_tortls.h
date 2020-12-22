@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2020, The Tor Project, Inc. */
+/* Copyright (c) 2010-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 #ifndef TEST_TORTLS_H
@@ -10,4 +10,4 @@ extern const char *notCompletelyValidCertString;
 extern const char *validCertString;
 extern const char *caCertString;
 
-#endif /* !defined(TEST_TORTLS_H) */
+#endif

@@ -1,13 +1,8 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
-
-/**
- * @file or_handshake_certs_st.h
- * @brief OR handshake certs structure
- **/
 
 #ifndef OR_HANDSHAKE_CERTS_ST
 #define OR_HANDSHAKE_CERTS_ST
@@ -42,4 +37,4 @@ struct or_handshake_certs_t {
   size_t ed_rsa_crosscert_len;
 };
 
-#endif /* !defined(OR_HANDSHAKE_CERTS_ST) */
+#endif

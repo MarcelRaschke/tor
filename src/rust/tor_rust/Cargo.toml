@@ -6,7 +6,7 @@ version = "0.1.0"
 [lib]
 name = "tor_rust"
 path = "lib.rs"
-crate_type = ["staticlib"]
+crate_type = ["rlib", "staticlib"]
 
 [dependencies.tor_util]
 path = "../tor_util"

@@ -1,4 +1,4 @@
-/* Copyright (c) 2008-2020, The Tor Project, Inc. */
+/* Copyright (c) 2008-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -16,8 +16,7 @@
 
 #include "lib/arch/bytes.h"
 #include "lib/cc/torint.h"
-#include "lib/smartlist_core/smartlist_core.h"
-#include "lib/smartlist_core/smartlist_foreach.h"
+#include "lib/container/smartlist.h"
 #include "lib/log/log.h"
 #include "lib/log/util_bug.h"
 #include "lib/malloc/malloc.h"
@@ -39,7 +38,7 @@
 #elif MEMAREA_ALIGN == 8
 #define MEMAREA_ALIGN_MASK ((uintptr_t)7)
 #else
-#error "void* is neither 4 nor 8 bytes long."
+#error "void* is neither 4 nor 8 bytes long. I don't know how to align stuff."
 #endif /* MEMAREA_ALIGN == 4 || ... */
 
 #if defined(__GNUC__) && defined(FLEXIBLE_ARRAY_MEMBER)
@@ -68,7 +67,7 @@
   uint32_t sent_val = get_uint32(&(chunk)->U_MEM[chunk->mem_size]);     \
   tor_assert(sent_val == SENTINEL_VAL);                                 \
   STMT_END
-#else /* !defined(USE_SENTINELS) */
+#else /* !(defined(USE_SENTINELS)) */
 #define SENTINEL_LEN 0
 #define SET_SENTINEL(chunk) STMT_NIL
 #define CHECK_SENTINEL(chunk) STMT_NIL
@@ -315,7 +314,7 @@ memarea_assert_ok(memarea_t *area)
   }
 }
 
-#else /* defined(DISABLE_MEMORY_SENTINELS) */
+#else /* !(!defined(DISABLE_MEMORY_SENTINELS)) */
 
 struct memarea_t {
   smartlist_t *pieces;

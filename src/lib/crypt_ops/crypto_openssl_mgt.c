@@ -1,7 +1,7 @@
 /* Copyright (c) 2001, Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -21,7 +21,7 @@
 #include "lib/testsupport/testsupport.h"
 #include "lib/thread/threads.h"
 
-DISABLE_GCC_WARNING("-Wredundant-decls")
+DISABLE_GCC_WARNING(redundant-decls)
 
 #include <openssl/err.h>
 #include <openssl/rsa.h>
@@ -36,7 +36,7 @@ DISABLE_GCC_WARNING("-Wredundant-decls")
 #include <openssl/crypto.h>
 #include <openssl/ssl.h>
 
-ENABLE_GCC_WARNING("-Wredundant-decls")
+ENABLE_GCC_WARNING(redundant-decls)
 
 #include <string.h>
 
@@ -101,21 +101,12 @@ static char *crypto_openssl_version_str = NULL;
 const char *
 crypto_openssl_get_version_str(void)
 {
-#ifdef OPENSSL_VERSION
-  const int query = OPENSSL_VERSION;
-#else
-  /* This old name was changed around OpenSSL 1.1.0 */
-  const int query = SSLEAY_VERSION;
-#endif
-
   if (crypto_openssl_version_str == NULL) {
-    const char *raw_version = OpenSSL_version(query);
+    const char *raw_version = OpenSSL_version(OPENSSL_VERSION);
     crypto_openssl_version_str = parse_openssl_version_str(raw_version);
   }
   return crypto_openssl_version_str;
 }
-
-#undef QUERY_OPENSSL_VERSION
 
 static char *crypto_openssl_header_version_str = NULL;
 /* Return a human-readable version of the compile-time openssl version
@@ -130,12 +121,10 @@ crypto_openssl_get_header_version_str(void)
   return crypto_openssl_header_version_str;
 }
 
-#ifndef COCCI
 #ifndef OPENSSL_THREADS
-#error "OpenSSL has been built without thread support. Tor requires an \
- OpenSSL library with thread support enabled."
+#error OpenSSL has been built without thread support. Tor requires an \
+ OpenSSL library with thread support enabled.
 #endif
-#endif /* !defined(COCCI) */
 
 #ifndef NEW_THREAD_API
 /** Helper: OpenSSL uses this callback to manipulate mutexes. */
@@ -187,10 +176,6 @@ crypto_openssl_free_all(void)
   tor_free(crypto_openssl_version_str);
   tor_free(crypto_openssl_header_version_str);
 
-  /* Destroying a locked mutex is undefined behaviour. This mutex may be
-   * locked, because multiple threads can access it. But we need to destroy
-   * it, otherwise re-initialisation will trigger undefined behaviour.
-   * See #31735 for details. */
 #ifndef NEW_THREAD_API
   if (n_openssl_mutexes_) {
     int n = n_openssl_mutexes_;
@@ -215,27 +200,19 @@ crypto_openssl_early_init(void)
                      OPENSSL_INIT_LOAD_CRYPTO_STRINGS |
                      OPENSSL_INIT_ADD_ALL_CIPHERS |
                      OPENSSL_INIT_ADD_ALL_DIGESTS, NULL);
-#else /* !defined(OPENSSL_1_1_API) */
+#else
     ERR_load_crypto_strings();
     OpenSSL_add_all_algorithms();
-#endif /* defined(OPENSSL_1_1_API) */
+#endif
 
     setup_openssl_threading();
 
-    unsigned long version_num = tor_OpenSSL_version_num();
-    const char *version_str = crypto_openssl_get_version_str();
+    unsigned long version_num = OpenSSL_version_num();
+    const char *version_str = OpenSSL_version(OPENSSL_VERSION);
     if (version_num == OPENSSL_VERSION_NUMBER &&
         !strcmp(version_str, OPENSSL_VERSION_TEXT)) {
       log_info(LD_CRYPTO, "OpenSSL version matches version from headers "
                  "(%lx: %s).", version_num, version_str);
-    } else if ((version_num & 0xffff0000) ==
-               (OPENSSL_VERSION_NUMBER & 0xffff0000)) {
-      log_notice(LD_CRYPTO,
-               "We compiled with OpenSSL %lx: %s and we "
-               "are running with OpenSSL %lx: %s. "
-               "These two versions should be binary compatible.",
-               (unsigned long)OPENSSL_VERSION_NUMBER, OPENSSL_VERSION_TEXT,
-               version_num, version_str);
     } else {
       log_warn(LD_CRYPTO, "OpenSSL version from headers does not match the "
                "version we're running with. If you get weird crashes, that "
@@ -284,14 +261,8 @@ log_engine(const char *fn, ENGINE *e)
 }
 #endif /* !defined(DISABLE_ENGINES) */
 
-/** Initialize engines for openssl (if enabled).  Load all the built-in
- * engines, along with the one called <b>accelName</b> (which may be NULL).
- * If <b>accelName</b> is prefixed with "!", then it is required: return -1
- * if it can't be loaded.  Otherwise return 0.
- *
- * If <b>accelDir</b> is not NULL, it is the path from which the engine should
- * be loaded. */
-static int
+/** Initialize engines for openssl (if enabled). */
+static void
 crypto_openssl_init_engines(const char *accelName,
                             const char *accelDir)
 {
@@ -299,13 +270,7 @@ crypto_openssl_init_engines(const char *accelName,
   (void)accelName;
   (void)accelDir;
   log_warn(LD_CRYPTO, "No OpenSSL hardware acceleration support enabled.");
-  if (accelName && accelName[0] == '!') {
-    log_warn(LD_CRYPTO, "Unable to load required dynamic OpenSSL engine "
-             "\"%s\".", accelName+1);
-    return -1;
-  }
-  return 0;
-#else /* !defined(DISABLE_ENGINES) */
+#else
   ENGINE *e = NULL;
 
   log_info(LD_CRYPTO, "Initializing OpenSSL engine support.");
@@ -313,9 +278,6 @@ crypto_openssl_init_engines(const char *accelName,
   ENGINE_register_all_complete();
 
   if (accelName) {
-    const bool required = accelName[0] == '!';
-    if (required)
-      ++accelName;
     if (accelDir) {
       log_info(LD_CRYPTO, "Trying to load dynamic OpenSSL engine \"%s\""
                " via path \"%s\".", accelName, accelDir);
@@ -326,11 +288,8 @@ crypto_openssl_init_engines(const char *accelName,
       e = ENGINE_by_id(accelName);
     }
     if (!e) {
-      log_warn(LD_CRYPTO, "Unable to load %sdynamic OpenSSL engine \"%s\".",
-               required?"required ":"",
+      log_warn(LD_CRYPTO, "Unable to load dynamic OpenSSL engine \"%s\".",
                accelName);
-      if (required)
-        return -1;
     } else {
       log_info(LD_CRYPTO, "Loaded dynamic OpenSSL engine \"%s\".",
                accelName);
@@ -367,7 +326,6 @@ crypto_openssl_init_engines(const char *accelName,
 #ifdef NID_aes_256_gcm
   log_engine("AES-256-GCM", ENGINE_get_cipher_engine(NID_aes_256_gcm));
 #endif
-  return 0;
 
 #endif /* defined(DISABLE_ENGINES) */
 }
@@ -378,8 +336,7 @@ crypto_openssl_late_init(int useAccel, const char *accelName,
                          const char *accelDir)
 {
   if (useAccel > 0) {
-    if (crypto_openssl_init_engines(accelName, accelDir) < 0)
-      return -1;
+    crypto_openssl_init_engines(accelName, accelDir);
   } else {
     log_info(LD_CRYPTO, "NOT using OpenSSL engine support.");
   }
@@ -408,7 +365,7 @@ crypto_openssl_thread_cleanup(void)
 void
 crypto_openssl_global_cleanup(void)
 {
-#ifndef OPENSSL_1_1_API
+  #ifndef OPENSSL_1_1_API
   EVP_cleanup();
 #endif
 #ifndef NEW_THREAD_API

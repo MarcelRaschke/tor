@@ -3,5 +3,4 @@ lib/cc/*.h
 lib/err/*.h
 lib/wallclock/*.h
 lib/string/*.h
-lib/subsys/*.h
 lib/testsupport/*.h

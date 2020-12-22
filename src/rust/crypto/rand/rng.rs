@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2019, The Tor Project, Inc.
+// Copyright (c) 2018, The Tor Project, Inc.
 // Copyright (c) 2018, isis agora lovecruft
 // See LICENSE for licensing information
 
@@ -33,7 +33,7 @@ mod internal {
     /// A wrapper around OpenSSL's RNG.
     pub struct TorRng {
         // This private, zero-length field forces the struct to be treated the
-        // same as its opaque C counterpart.
+        // same as its opaque C couterpart.
         _unused: [u8; 0],
     }
 
@@ -83,7 +83,7 @@ mod internal {
     /// obtained from the operating system.
     pub struct TorStrongestRng {
         // This private, zero-length field forces the struct to be treated the
-        // same as its opaque C counterpart.
+        // same as its opaque C couterpart.
         _unused: [u8; 0],
     }
 

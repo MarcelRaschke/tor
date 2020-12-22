@@ -1,22 +1,17 @@
-/* Copyright (c) 2017-2020, The Tor Project, Inc. */
+/* Copyright (c) 2017-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
-
-/**
- * @file scheduler_kist.c
- * @brief Implements the KIST cell scheduler.
- **/
 
 #define SCHEDULER_KIST_PRIVATE
 
 #include "core/or/or.h"
-#include "lib/buf/buffers.h"
+#include "lib/container/buffers.h"
 #include "app/config/config.h"
 #include "core/mainloop/connection.h"
 #include "feature/nodelist/networkstatus.h"
-#define CHANNEL_OBJECT_PRIVATE
+#define TOR_CHANNEL_INTERNAL_
 #include "core/or/channel.h"
 #include "core/or/channeltls.h"
-#define SCHEDULER_PRIVATE
+#define SCHEDULER_PRIVATE_
 #include "core/or/scheduler.h"
 #include "lib/math/fp.h"
 
@@ -51,22 +46,22 @@ socket_table_ent_eq(const socket_table_ent_t *a, const socket_table_ent_t *b)
   return a->chan == b->chan;
 }
 
-typedef HT_HEAD(socket_table_s, socket_table_ent_t) socket_table_t;
+typedef HT_HEAD(socket_table_s, socket_table_ent_s) socket_table_t;
 
 static socket_table_t socket_table = HT_INITIALIZER();
 
-HT_PROTOTYPE(socket_table_s, socket_table_ent_t, node, socket_table_ent_hash,
-             socket_table_ent_eq);
-HT_GENERATE2(socket_table_s, socket_table_ent_t, node, socket_table_ent_hash,
-             socket_table_ent_eq, 0.6, tor_reallocarray, tor_free_);
+HT_PROTOTYPE(socket_table_s, socket_table_ent_s, node, socket_table_ent_hash,
+             socket_table_ent_eq)
+HT_GENERATE2(socket_table_s, socket_table_ent_s, node, socket_table_ent_hash,
+             socket_table_ent_eq, 0.6, tor_reallocarray, tor_free_)
 
 /* outbuf_table hash table stuff. The outbuf_table keeps track of which
  * channels have data sitting in their outbuf so the kist scheduler can force
  * a write from outbuf to kernel periodically during a run and at the end of a
  * run. */
 
-typedef struct outbuf_table_ent_t {
-  HT_ENTRY(outbuf_table_ent_t) node;
+typedef struct outbuf_table_ent_s {
+  HT_ENTRY(outbuf_table_ent_s) node;
   channel_t *chan;
 } outbuf_table_ent_t;
 
@@ -82,10 +77,10 @@ outbuf_table_ent_eq(const outbuf_table_ent_t *a, const outbuf_table_ent_t *b)
   return a->chan->global_identifier == b->chan->global_identifier;
 }
 
-HT_PROTOTYPE(outbuf_table_s, outbuf_table_ent_t, node, outbuf_table_ent_hash,
-             outbuf_table_ent_eq);
-HT_GENERATE2(outbuf_table_s, outbuf_table_ent_t, node, outbuf_table_ent_hash,
-             outbuf_table_ent_eq, 0.6, tor_reallocarray, tor_free_);
+HT_PROTOTYPE(outbuf_table_s, outbuf_table_ent_s, node, outbuf_table_ent_hash,
+             outbuf_table_ent_eq)
+HT_GENERATE2(outbuf_table_s, outbuf_table_ent_s, node, outbuf_table_ent_hash,
+             outbuf_table_ent_eq, 0.6, tor_reallocarray, tor_free_)
 
 /*****************************************************************************
  * Other internal data
@@ -109,7 +104,7 @@ static unsigned int kist_lite_mode = 0;
  * changed and it doesn't recognized the values passed to the syscalls needed
  * by KIST. In that case, fallback to the naive approach. */
 static unsigned int kist_no_kernel_support = 0;
-#else /* !defined(HAVE_KIST_SUPPORT) */
+#else /* !(defined(HAVE_KIST_SUPPORT)) */
 static unsigned int kist_lite_mode = 1;
 #endif /* defined(HAVE_KIST_SUPPORT) */
 
@@ -203,7 +198,7 @@ update_socket_info_impl, (socket_table_ent_t *ent))
   tor_assert(ent);
   tor_assert(ent->chan);
   const tor_socket_t sock =
-    TO_CONN(CONST_BASE_CHAN_TO_TLS(ent->chan)->conn)->s;
+    TO_CONN(BASE_CHAN_TO_TLS((channel_t *) ent->chan)->conn)->s;
   struct tcp_info tcp;
   socklen_t tcp_info_len = sizeof(tcp);
 
@@ -291,7 +286,7 @@ update_socket_info_impl, (socket_table_ent_t *ent))
   extra_space =
     clamp_double_to_int64(
                  (ent->cwnd * (int64_t)ent->mss) * sock_buf_size_factor) -
-    ent->notsent - (int64_t)channel_outbuf_length((channel_t *) ent->chan);
+    ent->notsent;
   if ((tcp_space + extra_space) < 0) {
     /* This means that the "notsent" queue is just too big so we shouldn't put
      * more in the kernel for now. */
@@ -303,7 +298,7 @@ update_socket_info_impl, (socket_table_ent_t *ent))
   }
   return;
 
-#else /* !defined(HAVE_KIST_SUPPORT) */
+#else /* !(defined(HAVE_KIST_SUPPORT)) */
   goto fallback;
 #endif /* defined(HAVE_KIST_SUPPORT) */
 
@@ -445,11 +440,6 @@ update_socket_written(socket_table_t *table, channel_t *chan, size_t bytes)
  * one cell for each and bouncing back and forth. This KIST impl avoids that
  * by only writing a channel's outbuf to the kernel if it has 8 cells or more
  * in it.
- *
- * Note: The number 8 has been picked for no particular reasons except that it
- * is 4096 bytes which is a common number for buffering. A TLS record can hold
- * up to 16KiB thus using 8 cells means that a relay will at most send a TLS
- * record of 4KiB or 1/4 of the maximum capacity of a TLS record.
  */
 MOCK_IMPL(int, channel_should_write_to_kernel,
           (outbuf_table_t *table, channel_t *chan))
@@ -468,13 +458,6 @@ MOCK_IMPL(void, channel_write_to_kernel, (channel_t *chan))
   log_debug(LD_SCHED, "Writing %lu bytes to kernel for chan %" PRIu64,
             (unsigned long)channel_outbuf_length(chan),
             chan->global_identifier);
-  /* Note that 'connection_handle_write()' may change the scheduler state of
-   * the channel during the scheduling loop with
-   * 'connection_or_flushed_some()' -> 'scheduler_channel_wants_writes()'.
-   * This side-effect will only occur if the channel is currently in the
-   * 'SCHED_CHAN_WAITING_TO_WRITE' or 'SCHED_CHAN_IDLE' states, which KIST
-   * rarely uses, so it should be fine unless KIST begins using these states
-   * in the future. */
   connection_handle_write(TO_CONN(BASE_CHAN_TO_TLS(chan)->conn), 0);
 }
 
@@ -741,7 +724,7 @@ kist_scheduler_run(void)
     SMARTLIST_FOREACH_BEGIN(to_readd, channel_t *, readd_chan) {
       scheduler_set_channel_state(readd_chan, SCHED_CHAN_PENDING);
       if (!smartlist_contains(cp, readd_chan)) {
-        if (!SCHED_BUG(readd_chan->sched_heap_idx != -1, readd_chan)) {
+        if (!SCHED_BUG(chan->sched_heap_idx != -1, chan)) {
           /* XXXX Note that the check above is in theory redundant with
            * the smartlist_contains check.  But let's make sure we're
            * not messing anything up, and leave them both for now. */
@@ -850,7 +833,7 @@ scheduler_can_use_kist(void)
   return run_interval > 0;
 }
 
-#else /* !defined(HAVE_KIST_SUPPORT) */
+#else /* !(defined(HAVE_KIST_SUPPORT)) */
 
 int
 scheduler_can_use_kist(void)

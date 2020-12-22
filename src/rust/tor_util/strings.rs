@@ -1,4 +1,4 @@
-// Copyright (c) 2016-2019, The Tor Project, Inc. */
+// Copyright (c) 2016-2018, The Tor Project, Inc. */
 // See LICENSE for licensing information */
 
 //! Utilities for working with static strings.
@@ -105,7 +105,11 @@ macro_rules! cstr {
     ($($bytes:expr),*) => (
         ::std::ffi::CStr::from_bytes_with_nul(
             concat!($($bytes),*, "\0").as_bytes()
-        ).unwrap_or_default()
+        ).unwrap_or(
+            unsafe{
+                ::std::ffi::CStr::from_bytes_with_nul_unchecked(b"\0")
+            }
+        )
     )
 }
 

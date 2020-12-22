@@ -1,17 +1,14 @@
-/* Copyright (c) 2016-2020, The Tor Project, Inc. */
+/* Copyright (c) 2016-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 #define CRYPTO_ED25519_PRIVATE
-#define CONFIG_PRIVATE
 #include "orconfig.h"
 #include "core/or/or.h"
-#include "app/main/subsysmgr.h"
 #include "lib/err/backtrace.h"
 #include "app/config/config.h"
 #include "test/fuzz/fuzzing.h"
 #include "lib/compress/compress.h"
 #include "lib/crypt_ops/crypto_ed25519.h"
 #include "lib/crypt_ops/crypto_init.h"
-#include "lib/version/torversion.h"
 
 static or_options_t *mock_options = NULL;
 static const or_options_t *
@@ -97,10 +94,12 @@ disable_signature_checking(void)
 static void
 global_init(void)
 {
-  subsystems_init_upto(SUBSYS_LEVEL_LIBS);
-  flush_log_messages_from_startup();
-
+  tor_threads_init();
   tor_compress_init();
+
+  /* Initialise logging first */
+  init_logging(1);
+  configure_backtrace_handler(get_version());
 
   if (crypto_global_init(0, NULL, NULL) < 0)
     abort();
@@ -112,7 +111,7 @@ global_init(void)
   }
 
   /* set up the options. */
-  mock_options = options_new();
+  mock_options = tor_malloc_zero(sizeof(or_options_t));
   MOCK(get_options, mock_get_options);
 
   /* Make BUG() and nonfatal asserts crash */
@@ -138,7 +137,7 @@ LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
   return fuzz_main(Data, Size);
 }
 
-#else /* !defined(LLVM_FUZZ) */
+#else /* Not LLVM_FUZZ, so AFL. */
 
 int
 main(int argc, char **argv)
@@ -167,7 +166,7 @@ main(int argc, char **argv)
     memset(&s, 0, sizeof(s));
     set_log_severity_config(loglevel, LOG_ERR, &s);
     /* ALWAYS log bug warnings. */
-    s.masks[SEVERITY_MASK_IDX(LOG_WARN)] |= LD_BUG;
+    s.masks[LOG_WARN-LOG_ERR] |= LD_BUG;
     add_stream_log(&s, "", fileno(stdout));
   }
 
@@ -190,9 +189,9 @@ main(int argc, char **argv)
   if (fuzz_cleanup() < 0)
     abort();
 
-  or_options_free(mock_options);
+  tor_free(mock_options);
   UNMOCK(get_options);
   return 0;
 }
 
-#endif /* defined(LLVM_FUZZ) */
+#endif

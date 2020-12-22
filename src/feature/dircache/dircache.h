@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2018, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -38,6 +38,6 @@ STATIC int parse_hs_version_from_post(const char *url, const char *prefix,
                                       const char **end_pos);
 
 STATIC unsigned parse_accept_encoding_header(const char *h);
-#endif /* defined(DIRCACHE_PRIVATE) */
+#endif
 
 #endif /* !defined(TOR_DIRCACHE_H) */
