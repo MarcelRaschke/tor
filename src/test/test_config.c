@@ -1460,6 +1460,7 @@ test_config_find_my_address(void *arg)
 
   options = options_new();
   options_init(options);
+  options->PublishServerDescriptor_ = V3_DIRINFO;
 
   /*
    * Case 0:
@@ -1780,6 +1781,22 @@ test_config_find_my_address(void *arg)
 
   tt_int_op(n_get_interface_address6, OP_EQ, ++prev_n_get_interface_address6);
   VALIDATE_FOUND_ADDRESS(true, RESOLVED_ADDR_INTERFACE, NULL);
+  CLEANUP_FOUND_ADDRESS;
+
+  /*
+   * Case 15: Address is a local address (internal) but we unset
+   * PublishServerDescriptor_ so we are allowed to hold it.
+   */
+  options->PublishServerDescriptor_ = NO_DIRINFO;
+  if (p->family == AF_INET) {
+    options->AssumeReachable = 1;
+  }
+  config_line_append(&options->Address, "Address", p->internal_ip);
+
+  tor_addr_parse(&test_addr, p->internal_ip);
+  retval = find_my_address(options, p->family, LOG_NOTICE, &resolved_addr,
+                           &method_used, &hostname_out);
+  VALIDATE_FOUND_ADDRESS(true, RESOLVED_ADDR_CONFIGURED, NULL);
   CLEANUP_FOUND_ADDRESS;
 
   UNMOCK(get_interface_address6);
@@ -6868,8 +6885,97 @@ test_config_duplicate_orports(void *arg)
   /* This will remove the [::] and the extra [::1]. */
   remove_duplicate_orports(ports);
 
-  // The explicit IPv6 port should have replaced the implicit IPv6 port.
   tt_int_op(smartlist_len(ports), OP_EQ, 2);
+  tt_str_op(describe_relay_port(smartlist_get(ports, 0)), OP_EQ,
+            "ORPort 9050");
+  tt_str_op(describe_relay_port(smartlist_get(ports, 1)), OP_EQ,
+            "ORPort [::1]:9050");
+
+  /* Reset. Test different ORPort value. */
+  SMARTLIST_FOREACH(ports, port_cfg_t *, p, port_cfg_free(p));
+  smartlist_free(ports);
+  config_free_lines(config_port);
+  config_port = NULL;
+  ports = smartlist_new();
+
+  /* Implicit port and then specific IPv6 addresses but more than one. */
+  config_line_append(&config_port, "ORPort", "9050"); // two implicit entries.
+  config_line_append(&config_port, "ORPort", "[4242::1]:9051");
+  config_line_append(&config_port, "ORPort", "[4242::2]:9051");
+
+  // Parse IPv4, then IPv6.
+  port_parse_config(ports, config_port, "OR", CONN_TYPE_OR_LISTENER, "0.0.0.0",
+                    0, CL_PORT_SERVER_OPTIONS);
+  port_parse_config(ports, config_port, "OR", CONN_TYPE_OR_LISTENER, "[::]",
+                    0, CL_PORT_SERVER_OPTIONS);
+
+  /* There should be 6 ports at this point that is:
+   *    - 0.0.0.0:9050
+   *    - [::]:9050
+   *    - [4242::1]:9051
+   *    - [4242::1]:9051
+   *    - [4242::2]:9051
+   *    - [4242::2]:9051
+   */
+  tt_int_op(smartlist_len(ports), OP_EQ, 6);
+
+  /* This will remove the [::] and the duplicates. */
+  remove_duplicate_orports(ports);
+
+  /* We have four address here, 1 IPv4 on 9050, IPv6 on 9050, IPv6 on 9051 and
+   * a different IPv6 on 9051. */
+  tt_int_op(smartlist_len(ports), OP_EQ, 4);
+  tt_str_op(describe_relay_port(smartlist_get(ports, 0)), OP_EQ,
+            "ORPort 9050");
+  tt_str_op(describe_relay_port(smartlist_get(ports, 1)), OP_EQ,
+            "ORPort [4242::1]:9051");
+  tt_str_op(describe_relay_port(smartlist_get(ports, 2)), OP_EQ,
+            "ORPort [4242::2]:9051");
+  tt_str_op(describe_relay_port(smartlist_get(ports, 3)), OP_EQ,
+            "ORPort 9050");
+
+  /* Reset. Test different ORPort value. */
+  SMARTLIST_FOREACH(ports, port_cfg_t *, p, port_cfg_free(p));
+  smartlist_free(ports);
+  config_free_lines(config_port);
+  config_port = NULL;
+  ports = smartlist_new();
+
+  /* Three different ports. */
+  config_line_append(&config_port, "ORPort", "9050"); // two implicit entries.
+  config_line_append(&config_port, "ORPort", "[4242::1]:9051");
+  config_line_append(&config_port, "ORPort", "[4242::2]:9052");
+
+  // Parse IPv4, then IPv6.
+  port_parse_config(ports, config_port, "OR", CONN_TYPE_OR_LISTENER, "0.0.0.0",
+                    0, CL_PORT_SERVER_OPTIONS);
+  port_parse_config(ports, config_port, "OR", CONN_TYPE_OR_LISTENER, "[::]",
+                    0, CL_PORT_SERVER_OPTIONS);
+
+  /* There should be 6 ports at this point that is:
+   *    - 0.0.0.0:9050
+   *    - [::]:9050
+   *    - [4242::1]:9051
+   *    - [4242::1]:9051
+   *    - [4242::2]:9052
+   *    - [4242::2]:9052
+   */
+  tt_int_op(smartlist_len(ports), OP_EQ, 6);
+
+  /* This will remove the [::] and the duplicates. */
+  remove_duplicate_orports(ports);
+
+  /* We have four address here, 1 IPv4 on 9050, IPv6 on 9050, IPv6 on 9051 and
+   * IPv6 on 9052. */
+  tt_int_op(smartlist_len(ports), OP_EQ, 4);
+  tt_str_op(describe_relay_port(smartlist_get(ports, 0)), OP_EQ,
+            "ORPort 9050");
+  tt_str_op(describe_relay_port(smartlist_get(ports, 1)), OP_EQ,
+            "ORPort [4242::1]:9051");
+  tt_str_op(describe_relay_port(smartlist_get(ports, 2)), OP_EQ,
+            "ORPort [4242::2]:9052");
+  tt_str_op(describe_relay_port(smartlist_get(ports, 3)), OP_EQ,
+            "ORPort 9050");
 
  done:
   SMARTLIST_FOREACH(ports,port_cfg_t *,pf,port_cfg_free(pf));

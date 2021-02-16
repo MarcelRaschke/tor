@@ -5927,7 +5927,7 @@ static int
 fd_is_cloexec(tor_socket_t fd)
 {
   int flags = fcntl(fd, F_GETFD, 0);
-  return (flags & FD_CLOEXEC) == FD_CLOEXEC;
+  return (flags & FD_CLOEXEC) != 0;
 }
 #endif /* defined(FD_CLOEXEC) */
 
@@ -5937,7 +5937,7 @@ static int
 fd_is_nonblocking(tor_socket_t fd)
 {
   int flags = fcntl(fd, F_GETFL, 0);
-  return (flags & O_NONBLOCK) == O_NONBLOCK;
+  return (flags & O_NONBLOCK) != 0;
 }
 #endif /* !defined(_WIN32) */
 

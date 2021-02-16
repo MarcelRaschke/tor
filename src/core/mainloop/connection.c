@@ -3238,7 +3238,7 @@ retry_all_listeners(smartlist_t *new_conns, int close_all_noncontrol)
      * we hit those, bail early so tor can stop. */
     if (!new_conn) {
       log_warn(LD_NET, "Unable to create listener port: %s:%d",
-               fmt_addr(&r->new_port->addr), r->new_port->port);
+               fmt_and_decorate_addr(&r->new_port->addr), r->new_port->port);
       retval = -1;
       break;
     }
@@ -3257,7 +3257,8 @@ retry_all_listeners(smartlist_t *new_conns, int close_all_noncontrol)
    * any configured port.  Kill 'em. */
   SMARTLIST_FOREACH_BEGIN(listeners, connection_t *, conn) {
     log_notice(LD_NET, "Closing no-longer-configured %s on %s:%d",
-               conn_type_to_string(conn->type), conn->address, conn->port);
+               conn_type_to_string(conn->type),
+               fmt_and_decorate_addr(&conn->addr), conn->port);
     connection_close_immediate(conn);
     connection_mark_for_close(conn);
   } SMARTLIST_FOREACH_END(conn);
@@ -5234,6 +5235,8 @@ connection_reached_eof(connection_t *conn)
       return connection_dir_reached_eof(TO_DIR_CONN(conn));
     case CONN_TYPE_CONTROL:
       return connection_control_reached_eof(TO_CONTROL_CONN(conn));
+    case CONN_TYPE_METRICS:
+      return metrics_connection_reached_eof(conn);
     default:
       log_err(LD_BUG,"got unexpected conn type %d.", conn->type);
       tor_fragile_assert();
@@ -5852,7 +5855,8 @@ clock_skew_warning, (const connection_t *conn, long apparent_skew, int trusted,
   char *ext_source = NULL, *warn = NULL;
   format_time_interval(dbuf, sizeof(dbuf), apparent_skew);
   if (conn)
-    tor_asprintf(&ext_source, "%s:%s:%d", source, conn->address, conn->port);
+    tor_asprintf(&ext_source, "%s:%s:%d", source,
+                 fmt_and_decorate_addr(&conn->addr), conn->port);
   else
     ext_source = tor_strdup(source);
   log_fn(trusted ? LOG_WARN : LOG_INFO, domain,

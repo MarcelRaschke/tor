@@ -3519,22 +3519,30 @@ tell_controller_about_resolved_result(entry_connection_t *conn,
                                       int ttl,
                                       time_t expires)
 {
+  uint64_t stream_id = 0;
+
+  if (BUG(!conn)) {
+    return;
+  }
+
+  stream_id = ENTRY_TO_CONN(conn)->global_identifier;
+
   expires = time(NULL) + ttl;
   if (answer_type == RESOLVED_TYPE_IPV4 && answer_len >= 4) {
     char *cp = tor_dup_ip(ntohl(get_uint32(answer)));
     if (cp)
       control_event_address_mapped(conn->socks_request->address,
-                                   cp, expires, NULL, 0);
+                                   cp, expires, NULL, 0, stream_id);
     tor_free(cp);
   } else if (answer_type == RESOLVED_TYPE_HOSTNAME && answer_len < 256) {
     char *cp = tor_strndup(answer, answer_len);
     control_event_address_mapped(conn->socks_request->address,
-                                 cp, expires, NULL, 0);
+                                 cp, expires, NULL, 0, stream_id);
     tor_free(cp);
   } else {
     control_event_address_mapped(conn->socks_request->address,
                                  "<error>", time(NULL)+ttl,
-                                 "error=yes", 0);
+                                 "error=yes", 0, stream_id);
   }
 }
 
@@ -4231,6 +4239,15 @@ my_exit_policy_rejects(const tor_addr_t *addr,
   return 0;
 }
 
+/** Return true iff the consensus allows network reentry. The default value is
+ * false if the parameter is not found. */
+static bool
+network_reentry_is_allowed(void)
+{
+  /* Default is false, re-entry is not allowed. */
+  return !!networkstatus_get_param(NULL, "allow-network-reentry", 0, 0, 1);
+}
+
 /** Connect to conn's specified addr and port. If it worked, conn
  * has now been added to the connection_array.
  *
@@ -4258,6 +4275,33 @@ connection_exit_connect(edge_connection_t *edge_conn)
              connection_describe(conn),
              why_failed_exit_policy);
     connection_edge_end(edge_conn, END_STREAM_REASON_EXITPOLICY);
+    circuit_detach_stream(circuit_get_by_edge_conn(edge_conn), edge_conn);
+    connection_free(conn);
+    return;
+  }
+
+  /* Next, check for attempts to connect back into the Tor network. We don't
+   * want to allow these for the same reason we don't want to allow
+   * infinite-length circuits (see "A Practical Congestion Attack on Tor Using
+   * Long Paths", Usenix Security 2009). See also ticket 2667.
+   *
+   * Skip this if the network reentry is allowed (known from the consensus).
+   *
+   * The TORPROTOCOL reason is used instead of EXITPOLICY so client do NOT
+   * attempt to retry connecting onto another circuit that will also fail
+   * bringing considerable more load on the network if so.
+   *
+   * Since the address+port set here is a bloomfilter, in very rare cases, the
+   * check will create a false positive meaning that the destination could
+   * actually be legit and thus being denied exit. However, sending back a
+   * reason that makes the client retry results in much worst consequences in
+   * case of an attack so this is a small price to pay. */
+  if (!connection_edge_is_rendezvous_stream(edge_conn) &&
+      !network_reentry_is_allowed() &&
+      nodelist_reentry_contains(&conn->addr, conn->port)) {
+    log_info(LD_EXIT, "%s tried to connect back to a known relay address. "
+                      "Closing.", connection_describe(conn));
+    connection_edge_end(edge_conn, END_STREAM_REASON_CONNECTREFUSED);
     circuit_detach_stream(circuit_get_by_edge_conn(edge_conn), edge_conn);
     connection_free(conn);
     return;

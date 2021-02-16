@@ -428,19 +428,6 @@ static const config_var_t option_vars_[] = {
   V(DormantTimeoutDisabledByIdleStreams, BOOL,     "1"),
   V(DormantOnFirstStartup,       BOOL,      "0"),
   V(DormantCanceledByStartup,    BOOL,      "0"),
-  /* DoS circuit creation options. */
-  V(DoSCircuitCreationEnabled,   AUTOBOOL, "auto"),
-  V(DoSCircuitCreationMinConnections,      POSINT, "0"),
-  V(DoSCircuitCreationRate,      POSINT,     "0"),
-  V(DoSCircuitCreationBurst,     POSINT,     "0"),
-  V(DoSCircuitCreationDefenseType,         INT,  "0"),
-  V(DoSCircuitCreationDefenseTimePeriod,   INTERVAL, "0"),
-  /* DoS connection options. */
-  V(DoSConnectionEnabled,        AUTOBOOL, "auto"),
-  V(DoSConnectionMaxConcurrentCount,       POSINT, "0"),
-  V(DoSConnectionDefenseType,    INT,      "0"),
-  /* DoS single hop client options. */
-  V(DoSRefuseSingleHopClientRendezvous,    AUTOBOOL, "auto"),
   V(DownloadExtraInfo,           BOOL,     "0"),
   V(TestingEnableConnBwEvent,    BOOL,     "0"),
   V(TestingEnableCellStatsEvent, BOOL,     "0"),
@@ -2188,23 +2175,6 @@ options_act,(const or_options_t *old_options))
       }
     }
   }
-
-  /* Validate that we actually have a configured transport for a Bridge line
-   * that has one.  This is done here because we require the bridge and
-   * transport to be added to the global list before doing the validation.
-   *
-   * In an ideal world, pt_parse_transport_line() would actually return a
-   * transport_t object so we could inspect it and thus do this step at
-   * validation time. */
-  SMARTLIST_FOREACH_BEGIN(bridge_list_get(), const bridge_info_t *, bi) {
-    const char *bi_transport_name = bridget_get_transport_name(bi);
-    if (bi_transport_name && (!transport_get_by_name(bi_transport_name) &&
-                          !managed_proxy_has_transport(bi_transport_name))) {
-      log_warn(LD_CONFIG, "Bridge line with transport %s is missing a "
-                          "ClientTransportPlugin line", bi_transport_name);
-      return -1;
-    }
-  } SMARTLIST_FOREACH_END(bi);
 
   if (options_act_server_transport(old_options) < 0)
     return -1;
@@ -4338,6 +4308,7 @@ find_torrc_filename(const config_line_t *cmd_arg,
   const config_line_t *p_index;
   const char *fname_opt = defaults_file ? "--defaults-torrc" : "-f";
   const char *ignore_opt = defaults_file ? NULL : "--ignore-missing-torrc";
+  const char *keygen_opt = "--keygen";
 
   if (defaults_file)
     *ignore_missing_torrc = 1;
@@ -4359,7 +4330,8 @@ find_torrc_filename(const config_line_t *cmd_arg,
       }
 
       *using_default_fname = 0;
-    } else if (ignore_opt && !strcmp(p_index->key,ignore_opt)) {
+    } else if ((ignore_opt && !strcmp(p_index->key, ignore_opt)) ||
+               (keygen_opt && !strcmp(p_index->key, keygen_opt))) {
       *ignore_missing_torrc = 1;
     }
   }
@@ -4841,7 +4813,7 @@ addressmap_register_auto(const char *from, const char *to,
   }
 
   addressmap_register(from, tor_strdup(to), expires, addrmap_source,
-                      from_wildcard, to_wildcard);
+                      from_wildcard, to_wildcard, 0);
 
   return 0;
 }
@@ -6074,6 +6046,7 @@ port_parse_config(smartlist_t *out,
       port = (int) tor_parse_long(addrport, 10, 0, 65535, &ok, NULL);
       if (ok) {
         tor_addr_copy(&addr, &default_addr);
+        addr_is_explicit = false;
       } else if (tor_addr_port_lookup(addrport, &addr, &ptmp) == 0) {
         if (ptmp == 0) {
           log_warn(LD_CONFIG, "%sPort line has address but no port", portname);
@@ -6674,20 +6647,28 @@ get_first_listener_addrport_string(int listener_type)
 static const port_cfg_t *
 portconf_get_first_advertised(int listener_type, int address_family)
 {
+  const port_cfg_t *first_port = NULL;
+  const port_cfg_t *first_port_explicit_addr = NULL;
+
   if (address_family == AF_UNSPEC)
     return NULL;
 
   const smartlist_t *conf_ports = get_configured_ports();
   SMARTLIST_FOREACH_BEGIN(conf_ports, const port_cfg_t *, cfg) {
-    if (cfg->type == listener_type &&
-        !cfg->server_cfg.no_advertise) {
+    if (cfg->type == listener_type && !cfg->server_cfg.no_advertise) {
       if ((address_family == AF_INET && port_binds_ipv4(cfg)) ||
           (address_family == AF_INET6 && port_binds_ipv6(cfg))) {
-        return cfg;
+        if (cfg->explicit_addr && !first_port_explicit_addr) {
+          first_port_explicit_addr = cfg;
+        } else if (!first_port) {
+          first_port = cfg;
+        }
       }
     }
   } SMARTLIST_FOREACH_END(cfg);
-  return NULL;
+
+  /* Prefer the port with the explicit address if any. */
+  return (first_port_explicit_addr) ? first_port_explicit_addr : first_port;
 }
 
 /** Return the first advertised port of type <b>listener_type</b> in

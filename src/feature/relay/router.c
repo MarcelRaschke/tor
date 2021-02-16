@@ -138,6 +138,18 @@ static authority_cert_t *legacy_key_certificate = NULL;
  * used by tor-gencert to sign new signing keys and make new key
  * certificates. */
 
+/** Indicate if the IPv6 address should be omitted from the descriptor when
+ * publishing it. This can happen if the IPv4 is reachable but the
+ * auto-discovered IPv6 is not. We still publish the descriptor.
+ *
+ * Only relays should look at this and only for their descriptor.
+ *
+ * XXX: The real harder fix is to never put in the routerinfo_t a non
+ * reachable address and instead use the last resolved address cache to do
+ * reachability test or anything that has to do with what address tor thinks
+ * it has. */
+static bool omit_ipv6_on_publish = false;
+
 /** Return a readonly string with human readable description
  * of <b>err</b>.
  */
@@ -1419,7 +1431,11 @@ decide_if_publishable_server(void)
       return 0;
     }
   }
-  if (!router_orport_seems_reachable(options, AF_INET6)) {
+  /* We could be flagged to omit the IPv6 and if so, don't check for
+   * reachability on the IPv6. This can happen if the address was
+   * auto-discovered but turns out to be non reachable. */
+  if (!omit_ipv6_on_publish &&
+      !router_orport_seems_reachable(options, AF_INET6)) {
     // We have an ipv6 orport, and it doesn't seem reachable.
     if (!publish_even_when_ipv6_orport_unreachable) {
       return 0;
@@ -1450,10 +1466,9 @@ consider_publishable_server(int force)
     return;
 
   rebuilt = router_rebuild_descriptor(0);
-  if (decide_if_publishable_server()) {
+  if (rebuilt && decide_if_publishable_server()) {
     set_server_advertised(1);
-    if (rebuilt == 0)
-      router_upload_dir_desc_to_dirservers(force);
+    router_upload_dir_desc_to_dirservers(force);
   } else {
     set_server_advertised(0);
   }
@@ -1840,7 +1855,7 @@ router_get_my_extrainfo(void)
 {
   if (!server_mode(get_options()))
     return NULL;
-  if (router_rebuild_descriptor(0))
+  if (!router_rebuild_descriptor(0))
     return NULL;
   return desc_extrainfo;
 }
@@ -2071,12 +2086,11 @@ MOCK_IMPL(STATIC int,
 router_build_fresh_unsigned_routerinfo,(routerinfo_t **ri_out))
 {
   routerinfo_t *ri = NULL;
-  tor_addr_t ipv4_addr, ipv6_addr;
+  tor_addr_t ipv4_addr;
   char platform[256];
   int hibernating = we_are_hibernating();
   const or_options_t *options = get_options();
   int result = TOR_ROUTERINFO_ERROR_INTERNAL_BUG;
-  uint16_t ipv6_orport = 0;
 
   if (BUG(!ri_out)) {
     result = TOR_ROUTERINFO_ERROR_INTERNAL_BUG;
@@ -2088,10 +2102,6 @@ router_build_fresh_unsigned_routerinfo,(routerinfo_t **ri_out))
   bool have_v4 = relay_find_addr_to_publish(options, AF_INET,
                                             RELAY_FIND_ADDR_NO_FLAG,
                                             &ipv4_addr);
-  bool have_v6 = relay_find_addr_to_publish(options, AF_INET6,
-                                            RELAY_FIND_ADDR_NO_FLAG,
-                                            &ipv6_addr);
-
   /* Tor requires a relay to have an IPv4 so bail if we can't find it. */
   if (!have_v4) {
     log_info(LD_CONFIG, "Don't know my address while generating descriptor. "
@@ -2103,24 +2113,21 @@ router_build_fresh_unsigned_routerinfo,(routerinfo_t **ri_out))
   /* Log a message if the address in the descriptor doesn't match the ORPort
    * and DirPort addresses configured by the operator. */
   router_check_descriptor_address_consistency(&ipv4_addr);
-  router_check_descriptor_address_consistency(&ipv6_addr);
 
   ri = tor_malloc_zero(sizeof(routerinfo_t));
+  tor_addr_copy(&ri->ipv4_addr, &ipv4_addr);
   ri->cache_info.routerlist_index = -1;
   ri->nickname = tor_strdup(options->Nickname);
 
   /* IPv4. */
-  tor_addr_copy(&ri->ipv4_addr, &ipv4_addr);
   ri->ipv4_orport = routerconf_find_or_port(options, AF_INET);
   ri->ipv4_dirport = routerconf_find_dir_port(options, 0);
 
-  /* IPv6. Do not publish an IPv6 if we don't have an ORPort that can be used
-   * with the address. This is possible for instance if the ORPort is
-   * IPv4Only. */
-  ipv6_orport = routerconf_find_or_port(options, AF_INET6);
-  if (have_v6 && ipv6_orport != 0) {
-    tor_addr_copy(&ri->ipv6_addr, &ipv6_addr);
-    ri->ipv6_orport = ipv6_orport;
+  /* Optionally check for an IPv6. We still publish without one. */
+  if (relay_find_addr_to_publish(options, AF_INET6, RELAY_FIND_ADDR_NO_FLAG,
+                                 &ri->ipv6_addr)) {
+    ri->ipv6_orport = routerconf_find_or_port(options, AF_INET6);
+    router_check_descriptor_address_consistency(&ri->ipv6_addr);
   }
 
   ri->supports_tunnelled_dir_requests =
@@ -2437,9 +2444,10 @@ router_build_fresh_descriptor(routerinfo_t **r, extrainfo_t **e)
 
 /** If <b>force</b> is true, or our descriptor is out-of-date, rebuild a fresh
  * routerinfo, signed server descriptor, and extra-info document for this OR.
- * Return 0 on success, -1 on temporary error.
+ *
+ * Return true on success, else false on temporary error.
  */
-int
+bool
 router_rebuild_descriptor(int force)
 {
   int err = 0;
@@ -2447,13 +2455,13 @@ router_rebuild_descriptor(int force)
   extrainfo_t *ei;
 
   if (desc_clean_since && !force)
-    return 0;
+    return true;
 
   log_info(LD_OR, "Rebuilding relay descriptor%s", force ? " (forced)" : "");
 
   err = router_build_fresh_descriptor(&ri, &ei);
   if (err < 0) {
-    return err;
+    return false;
   }
 
   routerinfo_free(desc_routerinfo);
@@ -2469,7 +2477,7 @@ router_rebuild_descriptor(int force)
   }
   desc_dirty_reason = NULL;
   control_event_my_descriptor_changed();
-  return 0;
+  return true;
 }
 
 /** Called when we have a new set of consensus parameters. */
@@ -2489,18 +2497,6 @@ router_new_consensus_params(const networkstatus_t *ns)
   publish_even_when_ipv4_orport_unreachable = ar;
   publish_even_when_ipv6_orport_unreachable = ar || ar6;
 }
-
-/** Indicate if the IPv6 address should be omitted from the descriptor when
- * publishing it. This can happen if the IPv4 is reachable but the
- * auto-discovered IPv6 is not. We still publish the descriptor.
- *
- * Only relays should look at this and only for their descriptor.
- *
- * XXX: The real harder fix is to never put in the routerinfo_t a non
- * reachable address and instead use the last resolved address cache to do
- * reachability test or anything that has to do with what address tor thinks
- * it has. */
-static bool omit_ipv6_on_publish = false;
 
 /** Mark our descriptor out of data iff the IPv6 omit status flag is flipped
  * it changes from its previous value.
@@ -2702,18 +2698,15 @@ check_descriptor_ipaddress_changed(time_t now)
       previous = &my_ri->ipv6_addr;
     }
 
-    /* Ignore returned value because we want to notice not only an address
-     * change but also if an address is lost (current == UNSPEC). */
-    bool found = find_my_address(get_options(), family, LOG_INFO, &current,
-                                 &method, &hostname);
-    if (!found) {
-      /* Address was possibly not found because it is simply not configured or
-       * discoverable. Fallback to our cache, which includes any suggestion
-       * sent by a trusted directory server. */
-      found = relay_find_addr_to_publish(get_options(), family,
-                                         RELAY_FIND_ADDR_CACHE_ONLY,
-                                         &current);
-    }
+    /* Attempt to discovery the publishable address for the family which will
+     * actively attempt to discover the address if we are configured with a
+     * port for the family.
+     *
+     * It is OK to ignore the returned value here since in the failure case,
+     * that is the address was not found, the current value is set to UNSPEC.
+     * Add this (void) so Coverity is happy. */
+    (void) relay_find_addr_to_publish(get_options(), family,
+                                      RELAY_FIND_ADDR_NO_FLAG, &current);
 
     /* The "current" address might be UNSPEC meaning it was not discovered nor
      * found in our current cache. If we had an address before and we have

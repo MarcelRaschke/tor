@@ -37,6 +37,10 @@ details-*.json
 uptime-*.json
 *.full_url
 *.last_modified
+# Core files
+core
+core.*
+!core/
 # ccls file that can be per directory.
 *.ccls
 

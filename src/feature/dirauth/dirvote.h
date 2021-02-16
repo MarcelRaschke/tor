@@ -53,7 +53,7 @@
 #define MIN_SUPPORTED_CONSENSUS_METHOD 28
 
 /** The highest consensus method that we currently support. */
-#define MAX_SUPPORTED_CONSENSUS_METHOD 30
+#define MAX_SUPPORTED_CONSENSUS_METHOD 31
 
 /**
  * Lowest consensus method where microdescriptor lines are put in canonical
@@ -64,6 +64,11 @@
 /** Lowest consensus method where an unpadded base64 onion-key-ntor is allowed
  * See #7869 */
 #define MIN_METHOD_FOR_UNPADDED_NTOR_KEY 30
+
+/** Lowest consensus method for which we use the correct algorithm for
+ * extracting the bwweightscale= and maxunmeasuredbw= parameters. See #19011.
+ */
+#define MIN_METHOD_FOR_CORRECT_BWWEIGHTSCALE 31
 
 /** Default bandwidth to clip unmeasured bandwidths to using method >=
  * MIN_METHOD_TO_CLIP_UNMEASURED_BW.  (This is not a consensus method; do not
@@ -99,6 +104,7 @@ void dirvote_dirreq_get_status_vote(const char *url, smartlist_t *items,
 /* Storing signatures and votes functions */
 struct pending_vote_t * dirvote_add_vote(const char *vote_body,
                                          time_t time_posted,
+                                         const char *where_from,
                                          const char **msg_out,
                                          int *status_out);
 int dirvote_add_signatures(const char *detached_signatures_body,
@@ -149,11 +155,13 @@ dirvote_dirreq_get_status_vote(const char *url, smartlist_t *items,
 static inline struct pending_vote_t *
 dirvote_add_vote(const char *vote_body,
                  time_t time_posted,
+                 const char *where_from,
                  const char **msg_out,
                  int *status_out)
 {
   (void) vote_body;
   (void) time_posted;
+  (void) where_from;
   /* If the dirauth module is disabled, this should NEVER be called else we
    * failed to safeguard the dirauth module. */
   tor_assert_nonfatal_unreached();
@@ -256,6 +264,9 @@ STATIC
 char *networkstatus_get_detached_signatures(smartlist_t *consensuses);
 STATIC microdesc_t *dirvote_create_microdescriptor(const routerinfo_t *ri,
                                                    int consensus_method);
+STATIC int64_t extract_param_buggy(const char *params,
+                                   const char *param_name,
+                                   int64_t default_value);
 
 /** The recommended relay protocols for this authority's votes.
  * Recommending a new protocol causes old tor versions to log a warning.

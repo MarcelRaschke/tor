@@ -359,6 +359,12 @@ dnl ---
 dnl All our modules.
 m4_define(MODULES, relay dirauth dircache)
 
+# Some modules are only disabled through another option. For those, we don't
+# want to print the help in the summary at the end of the configure. Any entry
+# in the following set will not print the "--disable-module-NAME" command in
+# the summary.
+m4_set_add_all([MODULES_WITH_NO_OPTIONS], [dircache])
+
 dnl Relay module.
 AC_ARG_ENABLE([module-relay],
               AS_HELP_STRING([--disable-module-relay],
@@ -2810,10 +2816,10 @@ PPRINT_PROP_BOOL([libscrypt (--disable-libscrypt)], $value)
 test "x$enable_systemd" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([Systemd support (--enable-systemd)], $value)
 
-test "x$enable_lzma" = "xyes" && value=1 || value=0
+test "x$have_lzma" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([liblzma (--enable-lzma)], $value)
 
-test "x$enable_zstd" = "xyes" && value=1 || value=0
+test "x$have_zstd" = "xyes" && value=1 || value=0
 PPRINT_PROP_BOOL([libzstd (--enable-zstd)], $value)
 
 AS_ECHO
@@ -2834,7 +2840,9 @@ PPRINT_SUBTITLE([Modules])
 m4_foreach_w([mname], MODULES,
   [
     AM_COND_IF(m4_join([], [BUILD_MODULE_], m4_toupper([]mname[])), value=1, value=0)
-    PPRINT_PROP_BOOL([mname (--disable-module-mname)], $value)
+    m4_set_contains([MODULES_WITH_NO_OPTIONS], mname,
+                    PPRINT_PROP_BOOL([mname], $value),
+                    PPRINT_PROP_BOOL([mname (--disable-module-mname)], $value))
   ]
 )
 

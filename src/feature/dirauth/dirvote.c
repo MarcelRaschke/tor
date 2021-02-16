@@ -1757,26 +1757,14 @@ networkstatus_compute_consensus(smartlist_t *votes,
   }
 
   {
-    char *max_unmeasured_param = NULL;
-    /* XXXX Extract this code into a common function.  Or don't!  see #19011 */
-    if (params) {
-      if (strcmpstart(params, "maxunmeasuredbw=") == 0)
-        max_unmeasured_param = params;
-      else
-        max_unmeasured_param = strstr(params, " maxunmeasuredbw=");
-    }
-    if (max_unmeasured_param) {
-      int ok = 0;
-      char *eq = strchr(max_unmeasured_param, '=');
-      if (eq) {
-        max_unmeasured_bw_kb = (uint32_t)
-          tor_parse_ulong(eq+1, 10, 1, UINT32_MAX, &ok, NULL);
-        if (!ok) {
-          log_warn(LD_DIR, "Bad element '%s' in max unmeasured bw param",
-                   escaped(max_unmeasured_param));
-          max_unmeasured_bw_kb = DEFAULT_MAX_UNMEASURED_BW_KB;
-        }
-      }
+    if (consensus_method < MIN_METHOD_FOR_CORRECT_BWWEIGHTSCALE) {
+      max_unmeasured_bw_kb = (int32_t) extract_param_buggy(
+                  params, "maxunmeasuredbw", DEFAULT_MAX_UNMEASURED_BW_KB);
+    } else {
+      max_unmeasured_bw_kb = dirvote_get_intermediate_param_value(
+                  param_list, "maxunmeasurdbw", DEFAULT_MAX_UNMEASURED_BW_KB);
+      if (max_unmeasured_bw_kb < 1)
+        max_unmeasured_bw_kb = 1;
     }
   }
 
@@ -2326,38 +2314,16 @@ networkstatus_compute_consensus(smartlist_t *votes,
   smartlist_add_strdup(chunks, "directory-footer\n");
 
   {
-    int64_t weight_scale = BW_WEIGHT_SCALE;
-    char *bw_weight_param = NULL;
-
-    // Parse params, extract BW_WEIGHT_SCALE if present
-    // DO NOT use consensus_param_bw_weight_scale() in this code!
-    // The consensus is not formed yet!
-    /* XXXX Extract this code into a common function. Or not: #19011. */
-    if (params) {
-      if (strcmpstart(params, "bwweightscale=") == 0)
-        bw_weight_param = params;
-      else
-        bw_weight_param = strstr(params, " bwweightscale=");
+    int64_t weight_scale;
+    if (consensus_method < MIN_METHOD_FOR_CORRECT_BWWEIGHTSCALE) {
+      weight_scale = extract_param_buggy(params, "bwweightscale",
+                                         BW_WEIGHT_SCALE);
+    } else {
+      weight_scale = dirvote_get_intermediate_param_value(
+                       param_list, "bwweightscale", BW_WEIGHT_SCALE);
+      if (weight_scale < 1)
+        weight_scale = 1;
     }
-
-    if (bw_weight_param) {
-      int ok=0;
-      char *eq = strchr(bw_weight_param, '=');
-      if (eq) {
-        weight_scale = tor_parse_long(eq+1, 10, 1, INT32_MAX, &ok,
-                                         NULL);
-        if (!ok) {
-          log_warn(LD_DIR, "Bad element '%s' in bw weight param",
-              escaped(bw_weight_param));
-          weight_scale = BW_WEIGHT_SCALE;
-        }
-      } else {
-        log_warn(LD_DIR, "Bad element '%s' in bw weight param",
-            escaped(bw_weight_param));
-        weight_scale = BW_WEIGHT_SCALE;
-      }
-    }
-
     added_weights = networkstatus_compute_bw_weights_v10(chunks, G, M, E, D,
                                                          T, weight_scale);
   }
@@ -2457,6 +2423,53 @@ networkstatus_compute_consensus(smartlist_t *votes,
   smartlist_free(param_list);
 
   return result;
+}
+
+/** Extract the value of a parameter from a string encoding a list of
+ * parameters, badly.
+ *
+ * This is a deliberately buggy implementation, for backward compatibility
+ * with versions of Tor affected by #19011.  Once all authorities have
+ * upgraded to consensus method 31 or later, then we can throw away this
+ * function.  */
+STATIC int64_t
+extract_param_buggy(const char *params,
+                    const char *param_name,
+                    int64_t default_value)
+{
+  int64_t value = default_value;
+  const char *param_str = NULL;
+
+  if (params) {
+    char *prefix1 = NULL, *prefix2=NULL;
+    tor_asprintf(&prefix1, "%s=", param_name);
+    tor_asprintf(&prefix2, " %s=", param_name);
+    if (strcmpstart(params, prefix1) == 0)
+      param_str = params;
+    else
+      param_str = strstr(params, prefix2);
+    tor_free(prefix1);
+    tor_free(prefix2);
+  }
+
+  if (param_str) {
+    int ok=0;
+    char *eq = strchr(param_str, '=');
+    if (eq) {
+      value = tor_parse_long(eq+1, 10, 1, INT32_MAX, &ok, NULL);
+      if (!ok) {
+        log_warn(LD_DIR, "Bad element '%s' in %s",
+                 escaped(param_str), param_name);
+        value = default_value;
+      }
+    } else {
+      log_warn(LD_DIR, "Bad element '%s' in %s",
+               escaped(param_str), param_name);
+      value = default_value;
+    }
+  }
+
+  return value;
 }
 
 /** Given a list of networkstatus_t for each vote, return a newly allocated
@@ -2975,7 +2988,7 @@ dirvote_perform_vote(void)
   if (!contents)
     return -1;
 
-  pending_vote = dirvote_add_vote(contents, 0, &msg, &status);
+  pending_vote = dirvote_add_vote(contents, 0, "self", &msg, &status);
   tor_free(contents);
   if (!pending_vote) {
     log_warn(LD_DIR, "Couldn't store my own vote! (I told myself, '%s'.)",
@@ -3169,6 +3182,7 @@ add_new_cert_if_needed(const struct authority_cert_t *cert)
  * only) */
 pending_vote_t *
 dirvote_add_vote(const char *vote_body, time_t time_posted,
+                 const char *where_from,
                  const char **msg_out, int *status_out)
 {
   networkstatus_t *vote;
@@ -3226,6 +3240,14 @@ dirvote_add_vote(const char *vote_body, time_t time_posted,
     goto err;
   }
 
+  if (time_posted) { /* they sent it to me via a POST */
+    log_notice(LD_DIR, "%s posted a vote to me from %s.",
+               vi->nickname, where_from);
+  } else { /* I imported this one myself */
+    log_notice(LD_DIR, "Retrieved %s's vote from %s.",
+               vi->nickname, where_from);
+  }
+
   /* Check if we received it, as a post, after the cutoff when we
    * start asking other dir auths for it. If we do, the best plan
    * is to discard it, because using it greatly increases the chances
@@ -3235,10 +3257,10 @@ dirvote_add_vote(const char *vote_body, time_t time_posted,
     char tbuf1[ISO_TIME_LEN+1], tbuf2[ISO_TIME_LEN+1];
     format_iso_time(tbuf1, time_posted);
     format_iso_time(tbuf2, voting_schedule.fetch_missing_votes);
-    log_warn(LD_DIR, "Rejecting posted vote from %s received at %s; "
+    log_warn(LD_DIR, "Rejecting %s's posted vote from %s received at %s; "
              "our cutoff for received votes is %s. Check your clock, "
              "CPU load, and network load. Also check the authority that "
-             "posted the vote.", vi->address, tbuf1, tbuf2);
+             "posted the vote.", vi->nickname, vi->address, tbuf1, tbuf2);
     *msg_out = "Posted vote received too late, would be dangerous to count it";
     goto err;
   }
@@ -3254,8 +3276,8 @@ dirvote_add_vote(const char *vote_body, time_t time_posted,
         networkstatus_voter_info_t *vi_old = get_voter(v->vote);
         if (fast_memeq(vi_old->vote_digest, vi->vote_digest, DIGEST_LEN)) {
           /* Ah, it's the same vote. Not a problem. */
-          log_info(LD_DIR, "Discarding a vote we already have (from %s).",
-                   vi->address);
+          log_notice(LD_DIR, "Discarding a vote we already have (from %s).",
+                     vi->address);
           if (*status_out < 200)
             *status_out = 200;
           goto discard;
@@ -3278,6 +3300,8 @@ dirvote_add_vote(const char *vote_body, time_t time_posted,
             *msg_out = "OK";
           return v;
         } else {
+          log_notice(LD_DIR, "Discarding vote from %s because we have "
+                     "a newer one already.", vi->address);
           *msg_out = "Already have a newer pending vote";
           goto err;
         }
@@ -3462,6 +3486,15 @@ dirvote_compute_consensuses(void)
       pending[flav].body = consensus_body;
       pending[flav].consensus = consensus;
       n_generated++;
+
+      /* Write it out to disk too, for dir auth debugging purposes */
+      {
+        char *filename;
+        tor_asprintf(&filename, "my-consensus-%s", flavor_name);
+        write_str_to_file(get_datadir_fname(filename), consensus_body, 0);
+        tor_free(filename);
+      }
+
       consensus_body = NULL;
       consensus = NULL;
     }
@@ -4219,8 +4252,7 @@ compare_routerinfo_addrs_by_family(const routerinfo_t *a,
 {
   const tor_addr_t *addr1 = (family==AF_INET) ? &a->ipv4_addr : &a->ipv6_addr;
   const tor_addr_t *addr2 = (family==AF_INET) ? &b->ipv4_addr : &b->ipv6_addr;
-  const int maskbits = (family==AF_INET) ? 32 : 64;
-  return tor_addr_compare_masked(addr1, addr2, maskbits, CMP_EXACT);
+  return tor_addr_compare(addr1, addr2, CMP_EXACT);
 }
 
 /** Helper for sorting: compares two ipv4 routerinfos first by ipv4 address,
@@ -4392,6 +4424,7 @@ get_all_possible_sybil(const smartlist_t *routers)
   // Return the digestmap: it now contains all the possible sybils
   return omit_as_sybil;
 }
+
 /** Given a platform string as in a routerinfo_t (possibly null), return a
  * newly allocated version string for a networkstatus document, or NULL if the
  * platform doesn't give a Tor version. */
