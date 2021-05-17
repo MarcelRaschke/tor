@@ -1,4 +1,4 @@
-/* Copyright (c) 2016-2020, The Tor Project, Inc. */
+/* Copyright (c) 2016-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -210,7 +210,7 @@ typedef struct hs_service_config_t {
   /** Have we explicitly set HiddenServiceVersion? */
   unsigned int hs_version_explicitly_set : 1;
 
-  /** List of rend_service_port_config_t */
+  /** List of hs_port_config_t */
   smartlist_t *ports;
 
   /** Path on the filesystem where the service persistent data is stored. NULL
@@ -229,9 +229,6 @@ typedef struct hs_service_config_t {
   /** How many introduction points this service has. Specified by
    * HiddenServiceNumIntroductionPoints option. */
   unsigned int num_intro_points;
-
-  /** True iff the client auth is enabled. */
-  unsigned int is_client_auth_enabled : 1;
 
   /** List of hs_service_authorized_client_t's of clients that may access this
    * service. Specified by HiddenServiceAuthorizeClient option. */
@@ -397,6 +394,11 @@ service_authorized_client_free_(hs_service_authorized_client_t *client);
 #define service_authorized_client_free(c) \
   FREE_AND_NULL(hs_service_authorized_client_t, \
                            service_authorized_client_free_, (c))
+
+/* Config options. */
+int hs_service_allow_non_anonymous_connection(const or_options_t *options);
+int hs_service_non_anonymous_mode_enabled(const or_options_t *options);
+int hs_service_reveal_startup_time(const or_options_t *options);
 
 #ifdef HS_SERVICE_PRIVATE
 

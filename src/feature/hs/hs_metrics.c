@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, The Tor Project, Inc. */
+/* Copyright (c) 2020-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -29,18 +29,6 @@ port_to_str(const uint16_t port)
   return buf;
 }
 
-/** Return a static buffer pointer that contains a formatted label on the form
- * of key=value.
- *
- * Subsequent call to this function invalidates the previous buffer. */
-static const char *
-format_label(const char *key, const char *value)
-{
-  static char buf[128];
-  tor_snprintf(buf, sizeof(buf), "%s=%s", key, value);
-  return buf;
-}
-
 /** Initialize a metrics store for the given service.
  *
  * Essentially, this goes over the base_metrics array and adds them all to the
@@ -61,12 +49,12 @@ init_store(hs_service_t *service)
 
     /* Add labels to the entry. */
     metrics_store_entry_add_label(entry,
-                        format_label("onion", service->onion_address));
+                  metrics_format_label("onion", service->onion_address));
     if (base_metrics[i].port_as_label && service->config.ports) {
       SMARTLIST_FOREACH_BEGIN(service->config.ports,
-                              const rend_service_port_config_t *, p) {
+                              const hs_port_config_t *, p) {
         metrics_store_entry_add_label(entry,
-                      format_label("port", port_to_str(p->virtual_port)));
+                metrics_format_label("port", port_to_str(p->virtual_port)));
       } SMARTLIST_FOREACH_END(p);
     }
   }
@@ -96,7 +84,7 @@ hs_metrics_update_by_service(const hs_metrics_key_t key,
   SMARTLIST_FOREACH_BEGIN(entries, metrics_store_entry_t *, entry) {
     if (port == 0 ||
         metrics_store_entry_has_label(entry,
-                            format_label("port", port_to_str(port)))) {
+                      metrics_format_label("port", port_to_str(port)))) {
       metrics_store_entry_update(entry, n);
       break;
     }
@@ -149,9 +137,11 @@ hs_metrics_service_init(hs_service_t *service)
 {
   tor_assert(service);
 
-  /* Calling this function twice on a service object is wrong. The caller must
-   * free the metrics before if so. */
-  if (BUG(service->metrics.store)) {
+  /* This function is called when we register a service and so it could either
+   * be a new service or a service that was just reloaded through a HUP signal
+   * for instance. Thus, it is possible that the service has already an
+   * initialized store. If so, just return. */
+  if (service->metrics.store) {
     return;
   }
 

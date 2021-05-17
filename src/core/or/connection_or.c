@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -66,6 +66,7 @@
 #include "feature/nodelist/torcert.h"
 #include "core/or/channelpadding.h"
 #include "feature/dirauth/authmode.h"
+#include "feature/hs/hs_service.h"
 
 #include "core/or/cell_st.h"
 #include "core/or/cell_queue_st.h"
@@ -1979,7 +1980,8 @@ connection_or_client_learned_peer_id(or_connection_t *conn,
                                                    conn->identity_digest);
     const int is_authority_fingerprint = router_digest_is_trusted_dir(
                                                    conn->identity_digest);
-    const int non_anonymous_mode = rend_non_anonymous_mode_enabled(options);
+    const int non_anonymous_mode =
+      hs_service_non_anonymous_mode_enabled(options);
     int severity;
     const char *extra_log = "";
 

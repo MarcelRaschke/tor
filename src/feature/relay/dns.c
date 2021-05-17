@@ -1,6 +1,6 @@
 /* Copyright (c) 2003-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -63,6 +63,7 @@
 #include "feature/relay/dns.h"
 #include "feature/relay/router.h"
 #include "feature/relay/routermode.h"
+#include "feature/stats/rephist.h"
 #include "lib/crypt_ops/crypto_rand.h"
 #include "lib/evloop/compat_libevent.h"
 #include "lib/sandbox/sandbox.h"
@@ -211,20 +212,11 @@ evdns_log_cb(int warn, const char *msg)
   tor_log(severity, LD_EXIT, "eventdns: %s", msg);
 }
 
-/** Helper: passed to eventdns.c as a callback so it can generate random
- * numbers for transaction IDs and 0x20-hack coding. */
-static void
-dns_randfn_(char *b, size_t n)
-{
-  crypto_rand(b,n);
-}
-
 /** Initialize the DNS subsystem; called by the OR process. */
 int
 dns_init(void)
 {
   init_cache_map();
-  evdns_set_random_bytes_fn(dns_randfn_);
   if (server_mode(get_options())) {
     int r = configure_nameservers(1);
     return r;
@@ -1547,6 +1539,16 @@ evdns_callback(int result, char type, int count, int ttl, void *addresses,
 
   tor_addr_make_unspec(&addr);
 
+  /* Note down any DNS errors to the statistics module */
+  if (result == DNS_ERR_TIMEOUT) {
+    /* libevent timed out while resolving a name. However, because libevent
+     * handles retries and timeouts internally, this means that all attempts of
+     * libevent timed out. If we wanted to get more granular information about
+     * individual libevent attempts, we would have to implement our own DNS
+     * timeout/retry logic */
+    rep_hist_note_overload(OVERLOAD_GENERAL);
+  }
+
   /* Keep track of whether IPv6 is working */
   if (type == DNS_IPv6_AAAA) {
     if (result == DNS_ERR_TIMEOUT) {
@@ -1648,6 +1650,10 @@ evdns_callback(int result, char type, int count, int ttl, void *addresses,
     dns_found_answer(string_address, orig_query_type,
                      result, &addr, hostname, ttl);
 
+  /* The result can be changed within this function thus why we note the result
+   * at the end. */
+  rep_hist_note_dns_error(type, result);
+
   tor_free(arg_);
 }
 
@@ -1665,6 +1671,9 @@ launch_one_resolve(const char *address, uint8_t query_type,
   char *addr = tor_malloc(addr_len + 2);
   addr[0] = (char) query_type;
   memcpy(addr+1, address, addr_len + 1);
+
+  /* Note the query for our statistics. */
+  rep_hist_note_dns_request(query_type);
 
   switch (query_type) {
   case DNS_IPv4_A:

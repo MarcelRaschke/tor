@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -336,7 +336,7 @@ struct or_options_t {
   /* Makes hidden service clients and servers non-anonymous on this tor
    * instance. Allows the non-anonymous HiddenServiceSingleHopMode. Enables
    * non-anonymous behaviour in the hidden service protocol.
-   * Use rend_service_non_anonymous_mode_enabled() instead of using this option
+   * Use hs_service_non_anonymous_mode_enabled() instead of using this option
    * directly.
    */
   int HiddenServiceNonAnonymousMode;
@@ -428,9 +428,6 @@ struct or_options_t {
   int NumCPUs; /**< How many CPUs should we try to use? */
   struct config_line_t *RendConfigLines; /**< List of configuration lines
                                           * for rendezvous services. */
-  struct config_line_t *HidServAuth; /**< List of configuration lines for
-                               * client-side authorizations for hidden
-                               * services */
   char *ClientOnionAuthDir; /**< Directory to keep client
                              * onion service authorization secret keys */
   char *ContactInfo; /**< Contact info to be published in the directory. */
@@ -676,6 +673,9 @@ struct or_options_t {
 
   /** If true, include statistics file contents in extra-info documents. */
   int ExtraInfoStatistics;
+
+  /** If true, include overload statistics in extra-info documents. */
+  int OverloadStatistics;
 
   /** If true, do not believe anybody who tells us that a domain resolves
    * to an internal address, or that an internal address has a PTR mapping.
@@ -1035,6 +1035,13 @@ struct or_options_t {
    * to become dormant?
    **/
   int DormantClientTimeout;
+
+  /**
+   * Boolean: If enabled, then we consider the timeout when deciding whether
+   * to be dormant.  If not enabled, then only the SIGNAL ACTIVE/DORMANT
+   * controls can change our status.
+   **/
+  int DormantTimeoutEnabled;
 
   /** Boolean: true if having an idle stream is sufficient to prevent a client
    * from becoming dormant.

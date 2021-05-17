@@ -1,6 +1,6 @@
 /* Copyright (c) 2003, Roger Dingledine
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -533,6 +533,7 @@ unglob_win32(const char *pattern, int prev_sep, int next_sep)
   return result;
 }
 #elif HAVE_GLOB
+#ifdef GLOB_ALTDIRFUNC  // prevent warning about unused functions
 /** Same as opendir but calls sandbox_intern_string before */
 static DIR *
 prot_opendir(const char *name)
@@ -571,6 +572,20 @@ wrap_closedir(void *arg)
 {
   closedir(arg);
 }
+#endif /* defined(GLOB_ALTDIRFUNC) */
+
+/** Function passed to glob to handle processing errors. <b>epath</b> is the
+ * path that caused the error and <b>eerrno</b> is the errno set by the
+ * function that failed. We want to ignore ENOENT and ENOTDIR because, in BSD
+ * systems, these are not ignored automatically, which makes glob fail when
+ * globs expand to non-existing paths and GLOB_ERR is set.
+ */
+static int
+glob_errfunc(const char *epath, int eerrno)
+{
+    (void)epath;
+    return eerrno == ENOENT || eerrno == ENOTDIR ? 0 : -1;
+}
 #endif /* defined(HAVE_GLOB) */
 
 /** Return a new list containing the paths that match the pattern
@@ -591,7 +606,7 @@ tor_glob(const char *pattern)
   tor_free(pattern_normalized);
 #elif HAVE_GLOB /* !(defined(_WIN32)) */
   glob_t matches;
-  int flags = GLOB_ERR | GLOB_NOSORT;
+  int flags = GLOB_NOSORT;
 #ifdef GLOB_ALTDIRFUNC
   /* use functions that call sandbox_intern_string */
   flags |= GLOB_ALTDIRFUNC;
@@ -604,18 +619,23 @@ tor_glob(const char *pattern)
   matches.gl_stat = &prot_stat;
   matches.gl_lstat = &prot_lstat;
 #endif /* defined(GLOB_ALTDIRFUNC) */
-  int ret = glob(pattern, flags, NULL, &matches);
+  // use custom error handler to workaround BSD quirks and do not set GLOB_ERR
+  // because it would make glob fail on error even if the error handler ignores
+  // the error
+  int ret = glob(pattern, flags, glob_errfunc, &matches);
   if (ret == GLOB_NOMATCH) {
     return smartlist_new();
   } else if (ret != 0) {
     return NULL;
   }
 
-  // #40141: workaround for bug in glibc < 2.19 where patterns ending in path
-  // separator match files and folders instead of folders only
+  // #40141, !249: workaround for glibc bug where patterns ending in path
+  // separator match files and folders instead of folders only.
+  // this could be in #ifdef __GLIBC__ but: 1. it might affect other libcs too,
+  // and 2. it doesn't cost much to stat each match again since libc is already
+  // supposed to do it (otherwise the file may be on slow NFS or something)
   size_t pattern_len = strlen(pattern);
-  bool dir_only = has_glob(pattern) &&
-                  pattern_len > 0 && pattern[pattern_len-1] == *PATH_SEPARATOR;
+  bool dir_only = pattern_len > 0 && pattern[pattern_len-1] == *PATH_SEPARATOR;
 
   result = smartlist_new();
   size_t i;
@@ -636,7 +656,7 @@ tor_glob(const char *pattern)
 #else
   (void)pattern;
   return result;
-#endif /* !defined(HAVE_GLOB) */
+#endif /* defined(_WIN32) || ... */
 
   return result;
 }

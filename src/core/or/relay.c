@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -78,12 +78,12 @@
 #include "core/or/reasons.h"
 #include "core/or/relay.h"
 #include "core/crypto/relay_crypto.h"
-#include "feature/rend/rendcache.h"
 #include "feature/rend/rendcommon.h"
 #include "feature/nodelist/describe.h"
 #include "feature/nodelist/routerlist.h"
 #include "core/or/scheduler.h"
 #include "feature/hs/hs_metrics.h"
+#include "feature/stats/rephist.h"
 
 #include "core/or/cell_st.h"
 #include "core/or/cell_queue_st.h"
@@ -2701,18 +2701,25 @@ cell_queues_get_total_allocation(void)
 /** The time at which we were last low on memory. */
 static time_t last_time_under_memory_pressure = 0;
 
+/** Statistics on how many bytes were removed by the OOM per type. */
+uint64_t oom_stats_n_bytes_removed_dns = 0;
+uint64_t oom_stats_n_bytes_removed_cell = 0;
+uint64_t oom_stats_n_bytes_removed_geoip = 0;
+uint64_t oom_stats_n_bytes_removed_hsdir = 0;
+
 /** Check whether we've got too much space used for cells.  If so,
  * call the OOM handler and return 1.  Otherwise, return 0. */
 STATIC int
 cell_queues_check_size(void)
 {
+  size_t removed = 0;
   time_t now = time(NULL);
   size_t alloc = cell_queues_get_total_allocation();
   alloc += half_streams_get_total_allocation();
   alloc += buf_get_total_allocation();
   alloc += tor_compress_get_total_allocation();
-  const size_t rend_cache_total = rend_cache_get_total_allocation();
-  alloc += rend_cache_total;
+  const size_t hs_cache_total = hs_cache_get_total_allocation();
+  alloc += hs_cache_total;
   const size_t geoip_client_cache_total =
     geoip_client_cache_total_allocation();
   alloc += geoip_client_cache_total;
@@ -2721,26 +2728,36 @@ cell_queues_check_size(void)
   if (alloc >= get_options()->MaxMemInQueues_low_threshold) {
     last_time_under_memory_pressure = approx_time();
     if (alloc >= get_options()->MaxMemInQueues) {
+      /* Note this overload down */
+      rep_hist_note_overload(OVERLOAD_GENERAL);
+
       /* If we're spending over 20% of the memory limit on hidden service
        * descriptors, free them until we're down to 10%. Do the same for geoip
        * client cache. */
-      if (rend_cache_total > get_options()->MaxMemInQueues / 5) {
+      if (hs_cache_total > get_options()->MaxMemInQueues / 5) {
         const size_t bytes_to_remove =
-          rend_cache_total - (size_t)(get_options()->MaxMemInQueues / 10);
-        alloc -= hs_cache_handle_oom(now, bytes_to_remove);
+          hs_cache_total - (size_t)(get_options()->MaxMemInQueues / 10);
+        removed = hs_cache_handle_oom(now, bytes_to_remove);
+        oom_stats_n_bytes_removed_hsdir += removed;
+        alloc -= removed;
       }
       if (geoip_client_cache_total > get_options()->MaxMemInQueues / 5) {
         const size_t bytes_to_remove =
           geoip_client_cache_total -
           (size_t)(get_options()->MaxMemInQueues / 10);
-        alloc -= geoip_client_cache_handle_oom(now, bytes_to_remove);
+        removed = geoip_client_cache_handle_oom(now, bytes_to_remove);
+        oom_stats_n_bytes_removed_geoip += removed;
+        alloc -= removed;
       }
       if (dns_cache_total > get_options()->MaxMemInQueues / 5) {
         const size_t bytes_to_remove =
           dns_cache_total - (size_t)(get_options()->MaxMemInQueues / 10);
-        alloc -= dns_cache_handle_oom(now, bytes_to_remove);
+        removed = dns_cache_handle_oom(now, bytes_to_remove);
+        oom_stats_n_bytes_removed_dns += removed;
+        alloc -= removed;
       }
-      circuits_handle_oom(alloc);
+      removed = circuits_handle_oom(alloc);
+      oom_stats_n_bytes_removed_cell += removed;
       return 1;
     }
   }

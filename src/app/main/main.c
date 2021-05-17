@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -44,6 +44,7 @@
 #include "feature/dirparse/routerparse.h"
 #include "feature/hibernate/hibernate.h"
 #include "feature/hs/hs_dos.h"
+#include "feature/hs/hs_service.h"
 #include "feature/nodelist/authcert.h"
 #include "feature/nodelist/networkstatus.h"
 #include "feature/nodelist/routerlist.h"
@@ -51,8 +52,6 @@
 #include "feature/relay/ext_orport.h"
 #include "feature/relay/routerkeys.h"
 #include "feature/relay/routermode.h"
-#include "feature/rend/rendcache.h"
-#include "feature/rend/rendservice.h"
 #include "feature/stats/predict_ports.h"
 #include "feature/stats/bwhist.h"
 #include "feature/stats/rephist.h"
@@ -310,7 +309,7 @@ process_win32_console_ctrl(DWORD ctrl_type)
   activate_signal(SIGINT);
   return TRUE;
 }
-#endif
+#endif /* defined(_WIN32) */
 
 /**
  * Write current memory usage information to the log.
@@ -324,7 +323,6 @@ dumpmemusage(int severity)
   dump_routerlist_mem_usage(severity);
   dump_cell_pool_usage(severity);
   dump_dns_mem_usage(severity);
-  tor_log_mallinfo(severity);
 }
 
 /** Write all statistics to the log, with log level <b>severity</b>. Called
@@ -427,7 +425,6 @@ dumpstats(int severity)
   dumpmemusage(severity);
 
   rep_hist_dump_stats(now,severity);
-  rend_service_dump_stats(severity);
   hs_service_dump_stats(severity);
 }
 
@@ -517,7 +514,7 @@ handle_signals(void)
      * to handle control signals like Ctrl+C in the console, we can use this to
      * simulate the SIGINT signal */
     if (enabled) SetConsoleCtrlHandler(process_win32_console_ctrl, TRUE);
-#endif
+#endif /* defined(_WIN32) */
 }
 
 /* Cause the signal handler for signal_num to be called in the event loop. */
@@ -553,7 +550,6 @@ tor_init(int argc, char *argv[])
   rep_hist_init();
   bwhist_init();
   /* Initialize the service cache. */
-  rend_cache_init();
   addressmap_init(); /* Init the client dns cache. Do it always, since it's
                       * cheap. */
 
@@ -856,7 +852,6 @@ sandbox_init_filter(void)
 {
   const or_options_t *options = get_options();
   sandbox_cfg_t *cfg = sandbox_cfg_new();
-  int i;
 
   sandbox_cfg_allow_openat_filename(&cfg,
       get_cachedir_fname("cached-status"));
@@ -942,10 +937,23 @@ sandbox_init_filter(void)
   else
     sandbox_cfg_allow_open_filename(&cfg, tor_strdup("/etc/resolv.conf"));
 
-  for (i = 0; i < 2; ++i) {
-    if (get_torrc_fname(i)) {
-      sandbox_cfg_allow_open_filename(&cfg, tor_strdup(get_torrc_fname(i)));
-    }
+  const char *torrc_defaults_fname = get_torrc_fname(1);
+  if (torrc_defaults_fname) {
+    sandbox_cfg_allow_open_filename(&cfg, tor_strdup(torrc_defaults_fname));
+  }
+  const char *torrc_fname = get_torrc_fname(0);
+  if (torrc_fname) {
+    sandbox_cfg_allow_open_filename(&cfg, tor_strdup(torrc_fname));
+    // allow torrc backup and torrc.tmp to make SAVECONF work
+    char *torrc_bck = NULL;
+    tor_asprintf(&torrc_bck, CONFIG_BACKUP_PATTERN, torrc_fname);
+    sandbox_cfg_allow_rename(&cfg, tor_strdup(torrc_fname), torrc_bck);
+    char *torrc_tmp = NULL;
+    tor_asprintf(&torrc_tmp, "%s.tmp", torrc_fname);
+    sandbox_cfg_allow_rename(&cfg, torrc_tmp, tor_strdup(torrc_fname));
+    sandbox_cfg_allow_open_filename(&cfg, tor_strdup(torrc_tmp));
+    // we need to stat the existing backup file
+    sandbox_cfg_allow_stat_filename(&cfg, tor_strdup(torrc_bck));
   }
 
   SMARTLIST_FOREACH(options->FilesOpenedByIncludes, char *, f, {

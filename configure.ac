@@ -4,7 +4,7 @@ dnl Copyright (c) 2007-2019, The Tor Project, Inc.
 dnl See LICENSE for licensing information
 
 AC_PREREQ([2.63])
-AC_INIT([tor],[0.4.6.0-alpha-dev])
+AC_INIT([tor],[0.4.7.0-alpha-dev])
 AC_CONFIG_SRCDIR([src/app/main/tor_main.c])
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -18,7 +18,7 @@ AC_DEFINE_UNQUOTED([CONFIG_FLAGS], ["$configure_flags"], [Flags passed to config
 # version number changes.  Tor uses it to make sure that it
 # only shuts down for missing "required protocols" when those protocols
 # are listed as required by a consensus after this date.
-AC_DEFINE(APPROX_RELEASE_DATE, ["2020-11-17"], # for 0.4.6.0-alpha-dev
+AC_DEFINE(APPROX_RELEASE_DATE, ["2021-04-15"], # for 0.4.7.0-alpha-dev
           [Approximate date when this software was released. (Updated when the version changes.)])
 
 # "foreign" means we don't follow GNU package layout standards
@@ -454,7 +454,11 @@ AM_CONDITIONAL(BUILD_MANPAGE, [test "x$enable_manpage" != "xno"])
 AM_CONDITIONAL(BUILD_HTML_DOCS, [test "x$enable_html_manual" != "xno"])
 
 AM_PROG_CC_C_O
-AC_PROG_CC_C99
+
+dnl Before autoconf 2.70, AC_PROG_CC_C99 is supposedly necessary for some
+dnl compilers if you wan't C99 support. Starting with 2.70, it is obsolete and
+dnl forbidden.
+m4_version_prereq([2.70], [:], [AC_PROG_CC_C99])
 
 AC_CACHE_CHECK([for Python 3], [tor_cv_PYTHON],
    [AC_PATH_PROGS_FEATURE_CHECK([PYTHON], [ \
@@ -1157,7 +1161,7 @@ AC_RUN_IFELSE([AC_LANG_SOURCE([AC_LANG_PROGRAM([[
 ]])])], [openssl_ver_mismatch=no], [
    # This is a kludge to figure out whether compilation failed, or whether
    # running the program failed.
-   if test "$ac_retval" == "1"; then
+   if test "$ac_retval" = "1"; then
       openssl_ver_mismatch=inconclusive
    else
       openssl_ver_mismatch=yes
@@ -2156,7 +2160,6 @@ AS_CASE([$malloc],
 
   [system], [
      # handle this later, including the jemalloc fallback
-    AC_CHECK_FUNCS(mallinfo)
   ],
 
   [AC_MSG_ERROR([--with-malloc=`$with_malloc' not supported, see --help])

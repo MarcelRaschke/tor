@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -734,7 +734,7 @@ sb_socket(scmp_filter_ctx ctx, sandbox_cfg_t *filter)
     SCMP_CMP(2, SCMP_CMP_EQ, IPPROTO_IP));
   if (rc)
     return rc;
-#endif
+#endif /* defined(ENABLE_NSS) */
 
   rc = seccomp_rule_add_3(ctx, SCMP_ACT_ALLOW, SCMP_SYS(socket),
       SCMP_CMP(0, SCMP_CMP_EQ, PF_UNIX),
@@ -1608,6 +1608,28 @@ add_noparam_filter(scmp_filter_ctx ctx)
     }
   }
 
+  if (is_libc_at_least(2, 33)) {
+#ifdef __NR_newfstatat
+    // Libc 2.33 uses this syscall to implement both fstat() and stat().
+    //
+    // The trouble is that to implement fstat(fd, &st), it calls:
+    //     newfstatat(fs, "", &st, AT_EMPTY_PATH)
+    // We can't detect this usage in particular, because "" is a pointer
+    // we don't control.  And we can't just look for AT_EMPTY_PATH, since
+    // AT_EMPTY_PATH only has effect when the path string is empty.
+    //
+    // So our only solution seems to be allowing all fstatat calls, which
+    // means that an attacker can stat() anything on the filesystem. That's
+    // not a great solution, but I can't find a better one.
+    rc = seccomp_rule_add_0(ctx, SCMP_ACT_ALLOW, SCMP_SYS(newfstatat));
+    if (rc != 0) {
+      log_err(LD_BUG,"(Sandbox) failed to add newfstatat() syscall; "
+          "received libseccomp error %d", rc);
+      return rc;
+    }
+#endif
+  }
+
   return 0;
 }
 
@@ -1691,7 +1713,7 @@ get_syscall_from_ucontext(const ucontext_t *ctx)
 {
   return (int) ctx->uc_mcontext.M_SYSCALL;
 }
-#else
+#else /* !defined(SYSCALL_NAME_DEBUGGING) */
 static const char *
 get_syscall_name(int syscall_num)
 {
@@ -1704,7 +1726,7 @@ get_syscall_from_ucontext(const ucontext_t *ctx)
   (void) ctx;
   return -1;
 }
-#endif
+#endif /* defined(SYSCALL_NAME_DEBUGGING) */
 
 #ifdef USE_BACKTRACE
 #define MAX_DEPTH 256

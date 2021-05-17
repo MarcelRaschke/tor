@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -82,8 +82,6 @@ typedef struct control_cmd_syntax_t {
  * multiple versions so this union stores the key and passes it to the HS
  * subsystem depending on the requested version. */
 typedef union add_onion_secret_key_t {
-  /* Hidden service v2 secret key. */
-  crypto_pk_t *v2;
   /* Hidden service v3 secret key. */
   ed25519_secret_key_t *v3;
 } add_onion_secret_key_t;
@@ -99,12 +97,8 @@ STATIC hs_service_add_ephemeral_status_t add_onion_helper_add_service(
                              int hs_version,
                              add_onion_secret_key_t *pk,
                              smartlist_t *port_cfgs, int max_streams,
-                             int max_streams_close_circuit, int auth_type,
-                             smartlist_t *auth_clients,
+                             int max_streams_close_circuit,
                              smartlist_t *auth_clients_v3, char **address_out);
-
-STATIC rend_authorized_client_t *add_onion_helper_clientauth(const char *arg,
-                                   int *created, control_connection_t *conn);
 
 STATIC control_cmd_args_t *control_cmd_parse_args(
                                    const char *command,

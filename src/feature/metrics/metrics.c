@@ -1,4 +1,4 @@
-/* Copyright (c) 2007-2020, The Tor Project, Inc. */
+/* Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -255,6 +255,15 @@ metrics_connection_reached_eof(connection_t *conn)
 
   log_info(LD_EDGE, "Metrics connection reached EOF. Closing.");
   connection_mark_for_close(conn);
+  return 0;
+}
+
+/** Called when conn has no more bytes left on its outbuf. Return 0 indicating
+ * success. */
+int
+metrics_connection_finished_flushing(connection_t *conn)
+{
+  tor_assert(conn);
   return 0;
 }
 

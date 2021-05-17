@@ -1,7 +1,7 @@
 /* Copyright (c) 2001 Matej Pfajfar.
  * Copyright (c) 2001-2004, Roger Dingledine.
  * Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -58,18 +58,18 @@ time_t rep_hist_desc_stats_write(time_t now);
 
 void rep_hist_note_circuit_handshake_requested(uint16_t type);
 void rep_hist_note_circuit_handshake_assigned(uint16_t type);
+void rep_hist_note_circuit_handshake_dropped(uint16_t type);
 void rep_hist_log_circuit_handshake_stats(time_t now);
 
 MOCK_DECL(int, rep_hist_get_circuit_handshake_requested, (uint16_t type));
 MOCK_DECL(int, rep_hist_get_circuit_handshake_assigned, (uint16_t type));
+MOCK_DECL(uint64_t, rep_hist_get_circuit_handshake_dropped, (uint16_t type));
 
 void rep_hist_hs_stats_init(time_t now);
 void rep_hist_hs_stats_term(void);
 time_t rep_hist_hs_stats_write(time_t now, bool is_v3);
 
-char *rep_hist_get_hs_v2_stats_string(void);
 void rep_hist_seen_new_rp_cell(bool is_v2);
-void rep_hist_hsdir_stored_maybe_new_v2_onion(const crypto_pk_t *pubkey);
 
 char *rep_hist_get_hs_v3_stats_string(void);
 void rep_hist_hsdir_stored_maybe_new_v3_onion(const uint8_t *blinded_key);
@@ -80,11 +80,17 @@ void rep_hist_note_negotiated_link_proto(unsigned link_proto,
                                          int started_here);
 void rep_hist_log_link_protocol_counts(void);
 
+uint64_t rep_hist_get_n_dns_error(int type, uint8_t error);
+uint64_t rep_hist_get_n_dns_request(int type);
+void rep_hist_note_dns_request(int type);
+void rep_hist_note_dns_error(int type, uint8_t error);
+
 extern uint64_t rephist_total_alloc;
 extern uint32_t rephist_total_num;
 #ifdef TOR_UNIT_TESTS
 extern int onion_handshakes_requested[MAX_ONION_HANDSHAKE_TYPE+1];
 extern int onion_handshakes_assigned[MAX_ONION_HANDSHAKE_TYPE+1];
+extern uint64_t onion_handshakes_dropped[MAX_ONION_HANDSHAKE_TYPE+1];
 #endif
 
 #ifdef REPHIST_PRIVATE
@@ -93,10 +99,6 @@ extern int onion_handshakes_assigned[MAX_ONION_HANDSHAKE_TYPE+1];
 typedef struct hs_v2_stats_t {
   /** How many v2 relay cells have we seen as rendezvous points? */
   uint64_t rp_v2_relay_cells_seen;
-
-  /** Set of unique public key digests we've seen this stat period
-   * (could also be implemented as sorted smartlist). */
-  digestmap_t *v2_onions_seen_this_period;
 } hs_v2_stats_t;
 
 /** Structure that contains the various statistics we keep about v3
@@ -146,11 +148,36 @@ void rep_hist_reset_padding_counts(void);
 void rep_hist_prep_published_padding_counts(time_t now);
 void rep_hist_padding_count_timers(uint64_t num_timers);
 
+/**
+ * Represents the various types of overload we keep track of and expose in our
+ * extra-info descriptor.
+*/
+typedef enum {
+  /* A general overload -- can have many different causes. */
+  OVERLOAD_GENERAL,
+  /* We went over our configured read rate/burst bandwidth limit */
+  OVERLOAD_READ,
+  /* We went over our configured write rate/burst bandwidth limit */
+  OVERLOAD_WRITE,
+  /* We exhausted the file descriptors in this system */
+  OVERLOAD_FD_EXHAUSTED,
+} overload_type_t;
+
+void rep_hist_note_overload(overload_type_t overload);
+char *rep_hist_get_overload_general_line(void);
+char *rep_hist_get_overload_stats_lines(void);
+
+void rep_hist_note_tcp_exhaustion(void);
+uint64_t rep_hist_get_n_tcp_exhaustion(void);
+
+uint64_t rep_hist_get_n_read_limit_reached(void);
+uint64_t rep_hist_get_n_write_limit_reached(void);
+
 #ifdef TOR_UNIT_TESTS
 struct hs_v2_stats_t;
 const struct hs_v2_stats_t *rep_hist_get_hs_v2_stats(void);
 struct hs_v3_stats_t;
 const struct hs_v3_stats_t *rep_hist_get_hs_v3_stats(void);
-#endif
+#endif /* defined(TOR_UNIT_TESTS) */
 
 #endif /* !defined(TOR_REPHIST_H) */

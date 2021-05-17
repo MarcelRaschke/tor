@@ -1,4 +1,4 @@
-/* Copyright (c) 2020, The Tor Project, Inc. */
+/* Copyright (c) 2020-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -22,13 +22,11 @@ MOCK_DECL(bool, relay_find_addr_to_publish,
           (const or_options_t *options, int family, int flags,
            tor_addr_t *addr_out));
 
-bool relay_has_address_set(int family);
-
 void relay_addr_learn_from_dirauth(void);
 
 #ifdef RELAY_FIND_ADDR_PRIVATE
 
 #endif /* RELAY_FIND_ADDR_PRIVATE */
 
-#endif /* TOR_RELAY_FIND_ADDR_H */
+#endif /* !defined(TOR_RELAY_FIND_ADDR_H) */
 

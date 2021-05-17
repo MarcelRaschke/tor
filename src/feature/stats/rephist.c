@@ -1,5 +1,5 @@
 /* Copyright (c) 2004-2006, Roger Dingledine, Nick Mathewson.
- * Copyright (c) 2007-2020, The Tor Project, Inc. */
+ * Copyright (c) 2007-2021, The Tor Project, Inc. */
 /* See LICENSE for licensing information */
 
 /**
@@ -83,6 +83,8 @@
 
 #include "feature/nodelist/networkstatus_st.h"
 #include "core/or/or_circuit_st.h"
+
+#include <event2/dns.h>
 
 #ifdef HAVE_FCNTL_H
 #include <fcntl.h>
@@ -182,6 +184,353 @@ static time_t started_tracking_stability = 0;
 
 /** Map from hex OR identity digest to or_history_t. */
 static digestmap_t *history_map = NULL;
+
+/** Represents a state of overload stats.
+ *
+ *  All the timestamps in this structure have already been rounded down to the
+ *  nearest hour. */
+typedef struct {
+  /* When did we last experience a general overload? */
+  time_t overload_general_time;
+
+  /* When did we last experience a bandwidth-related overload? */
+  time_t overload_ratelimits_time;
+  /* How many times have we gone off the our read limits? */
+  uint64_t overload_read_count;
+  /* How many times have we gone off the our write limits? */
+  uint64_t overload_write_count;
+
+  /* When did we last experience a file descriptor exhaustion? */
+  time_t overload_fd_exhausted_time;
+  /* How many times have we experienced a file descriptor exhaustion? */
+  uint64_t overload_fd_exhausted;
+} overload_stats_t;
+
+/** Current state of overload stats */
+static overload_stats_t overload_stats;
+
+/** Counters to count the number of times we've reached an overload for the
+ * global connection read/write limit. Reported on the MetricsPort. */
+static uint64_t stats_n_read_limit_reached = 0;
+static uint64_t stats_n_write_limit_reached = 0;
+
+/** Total number of times we've reached TCP port exhaustion. */
+static uint64_t stats_n_tcp_exhaustion = 0;
+
+/***** DNS statistics *****/
+
+/** Represents the statistics of DNS queries seen if it is an Exit. */
+typedef struct {
+  /* Total number of DNS errors found in RFC 1035 (from 0 to 5 code). */
+  uint64_t stats_n_error_none;          /* 0 */
+  uint64_t stats_n_error_format;        /* 1 */
+  uint64_t stats_n_error_serverfailed;  /* 2 */
+  uint64_t stats_n_error_notexist;      /* 3 */
+  uint64_t stats_n_error_notimpl;       /* 4 */
+  uint64_t stats_n_error_refused;       /* 5 */
+
+  /* Total number of DNS errors specific to libevent. */
+  uint64_t stats_n_error_truncated; /* 65 */
+  uint64_t stats_n_error_unknown;   /* 66 */
+  uint64_t stats_n_error_timeout;   /* 67 */
+  uint64_t stats_n_error_shutdown;  /* 68 */
+  uint64_t stats_n_error_cancel;    /* 69 */
+  uint64_t stats_n_error_nodata;    /* 70 */
+
+  /* Total number of DNS request seen at an Exit. They might not all end
+   * successfully or might even be lost by tor. This counter is incremented
+   * right before the DNS request is initiated. */
+  uint64_t stats_n_request;
+} dns_stats_t;
+
+/** DNS statistics store for each DNS record type for which tor supports only
+ * three at the moment: A, PTR and AAAA. */
+static dns_stats_t dns_A_stats;
+static dns_stats_t dns_PTR_stats;
+static dns_stats_t dns_AAAA_stats;
+
+/** From a libevent record type, return a pointer to the corresponding DNS
+ * statistics store. NULL is returned if the type is unhandled. */
+static inline dns_stats_t *
+get_dns_stats_by_type(const int type)
+{
+  switch (type) {
+  case DNS_IPv4_A:
+    return &dns_A_stats;
+  case DNS_PTR:
+    return &dns_PTR_stats;
+  case DNS_IPv6_AAAA:
+    return &dns_AAAA_stats;
+  default:
+    return NULL;
+  }
+}
+
+/** Return the DNS error count for the given libevent DNS type and error code.
+ * The possible types are: DNS_IPv4_A, DNS_PTR, DNS_IPv6_AAAA. */
+uint64_t
+rep_hist_get_n_dns_error(int type, uint8_t error)
+{
+  dns_stats_t *dns_stats = get_dns_stats_by_type(type);
+  if (BUG(!dns_stats)) {
+    return 0;
+  }
+
+  switch (error) {
+  case DNS_ERR_NONE:
+    return dns_stats->stats_n_error_none;
+  case DNS_ERR_FORMAT:
+    return dns_stats->stats_n_error_format;
+  case DNS_ERR_SERVERFAILED:
+    return dns_stats->stats_n_error_serverfailed;
+  case DNS_ERR_NOTEXIST:
+    return dns_stats->stats_n_error_notexist;
+  case DNS_ERR_NOTIMPL:
+    return dns_stats->stats_n_error_notimpl;
+  case DNS_ERR_REFUSED:
+    return dns_stats->stats_n_error_refused;
+  case DNS_ERR_TRUNCATED:
+    return dns_stats->stats_n_error_truncated;
+  case DNS_ERR_UNKNOWN:
+    return dns_stats->stats_n_error_unknown;
+  case DNS_ERR_TIMEOUT:
+    return dns_stats->stats_n_error_timeout;
+  case DNS_ERR_SHUTDOWN:
+    return dns_stats->stats_n_error_shutdown;
+  case DNS_ERR_CANCEL:
+    return dns_stats->stats_n_error_cancel;
+  case DNS_ERR_NODATA:
+    return dns_stats->stats_n_error_nodata;
+  default:
+    /* Unhandled code sent back by libevent. */
+    return 0;
+  }
+}
+
+/** Return the total number of DNS request seen for the given libevent DNS
+ * record type. Possible types are: DNS_IPv4_A, DNS_PTR, DNS_IPv6_AAAA. */
+uint64_t
+rep_hist_get_n_dns_request(int type)
+{
+  dns_stats_t *dns_stats = get_dns_stats_by_type(type);
+  if (BUG(!dns_stats)) {
+    return 0;
+  }
+  return dns_stats->stats_n_request;
+}
+
+/** Note a DNS error for the given given libevent DNS record type and error
+ * code. Possible types are: DNS_IPv4_A, DNS_PTR, DNS_IPv6_AAAA. */
+void
+rep_hist_note_dns_error(int type, uint8_t error)
+{
+  dns_stats_t *dns_stats = get_dns_stats_by_type(type);
+  /* Unsupported DNS query type. */
+  if (!dns_stats) {
+    return;
+  }
+
+  switch (error) {
+  case DNS_ERR_NONE:
+    dns_stats->stats_n_error_none++;
+    break;
+  case DNS_ERR_FORMAT:
+    dns_stats->stats_n_error_format++;
+    break;
+  case DNS_ERR_SERVERFAILED:
+    dns_stats->stats_n_error_serverfailed++;
+    break;
+  case DNS_ERR_NOTEXIST:
+    dns_stats->stats_n_error_notexist++;
+    break;
+  case DNS_ERR_NOTIMPL:
+    dns_stats->stats_n_error_notimpl++;
+    break;
+  case DNS_ERR_REFUSED:
+    dns_stats->stats_n_error_refused++;
+    break;
+  case DNS_ERR_TRUNCATED:
+    dns_stats->stats_n_error_truncated++;
+    break;
+  case DNS_ERR_UNKNOWN:
+    dns_stats->stats_n_error_unknown++;
+    break;
+  case DNS_ERR_TIMEOUT:
+    dns_stats->stats_n_error_timeout++;
+    break;
+  case DNS_ERR_SHUTDOWN:
+    dns_stats->stats_n_error_shutdown++;
+    break;
+  case DNS_ERR_CANCEL:
+    dns_stats->stats_n_error_cancel++;
+    break;
+  case DNS_ERR_NODATA:
+    dns_stats->stats_n_error_nodata++;
+    break;
+  default:
+    /* Unhandled code sent back by libevent. */
+    break;
+  }
+}
+
+/** Note a DNS request for the given given libevent DNS record type. */
+void
+rep_hist_note_dns_request(int type)
+{
+  dns_stats_t *dns_stats = get_dns_stats_by_type(type);
+  if (BUG(!dns_stats)) {
+    return;
+  }
+  dns_stats->stats_n_request++;
+}
+
+/***** END of DNS statistics *****/
+
+/** Return true if this overload happened within the last `n_hours`. */
+static bool
+overload_happened_recently(time_t overload_time, int n_hours)
+{
+  /* An overload is relevant if it happened in the last 72 hours */
+  if (overload_time > approx_time() - 3600 * n_hours) {
+    return true;
+  }
+  return false;
+}
+
+/* The current version of the overload stats version */
+#define OVERLOAD_STATS_VERSION 1
+
+/** Return the stats_n_read_limit_reached counter. */
+uint64_t
+rep_hist_get_n_read_limit_reached(void)
+{
+  return stats_n_read_limit_reached;
+}
+
+/** Return the stats_n_write_limit_reached counter. */
+uint64_t
+rep_hist_get_n_write_limit_reached(void)
+{
+  return stats_n_write_limit_reached;
+}
+
+/** Returns an allocated string for server descriptor for publising information
+ * on whether we are overloaded or not. */
+char *
+rep_hist_get_overload_general_line(void)
+{
+  char *result = NULL;
+  char tbuf[ISO_TIME_LEN+1];
+
+  /* Encode the general overload */
+  if (overload_happened_recently(overload_stats.overload_general_time, 72)) {
+    format_iso_time(tbuf, overload_stats.overload_general_time);
+    tor_asprintf(&result, "overload-general %d %s\n",
+                 OVERLOAD_STATS_VERSION, tbuf);
+  }
+
+  return result;
+}
+
+/** Returns an allocated string for extra-info documents for publishing
+ *  overload statistics. */
+char *
+rep_hist_get_overload_stats_lines(void)
+{
+  char *result = NULL;
+  smartlist_t *chunks = smartlist_new();
+  char tbuf[ISO_TIME_LEN+1];
+
+  /* Add bandwidth-related overloads */
+  if (overload_happened_recently(overload_stats.overload_ratelimits_time,24)) {
+    const or_options_t *options = get_options();
+    format_iso_time(tbuf, overload_stats.overload_ratelimits_time);
+    smartlist_add_asprintf(chunks,
+                           "overload-ratelimits %d %s %" PRIu64 " %" PRIu64
+                           " %" PRIu64 " %" PRIu64 "\n",
+                           OVERLOAD_STATS_VERSION, tbuf,
+                           options->BandwidthRate, options->BandwidthBurst,
+                           overload_stats.overload_read_count,
+                           overload_stats.overload_write_count);
+  }
+
+  /* Finally file descriptor overloads */
+  if (overload_happened_recently(
+                              overload_stats.overload_fd_exhausted_time, 72)) {
+    format_iso_time(tbuf, overload_stats.overload_fd_exhausted_time);
+    smartlist_add_asprintf(chunks, "overload-fd-exhausted %d %s\n",
+                           OVERLOAD_STATS_VERSION, tbuf);
+  }
+
+  /* Bail early if we had nothing to write */
+  if (smartlist_len(chunks) == 0) {
+    goto done;
+  }
+
+  result = smartlist_join_strings(chunks, "", 0, NULL);
+
+ done:
+  SMARTLIST_FOREACH(chunks, char *, cp, tor_free(cp));
+  smartlist_free(chunks);
+  return result;
+}
+
+/** Round down the time in `a` to the beginning of the current hour */
+#define SET_TO_START_OF_HOUR(a) STMT_BEGIN \
+  (a) = approx_time() - (approx_time() % 3600); \
+STMT_END
+
+/** Note down an overload event of type `overload`. */
+void
+rep_hist_note_overload(overload_type_t overload)
+{
+  static time_t last_read_counted = 0;
+  static time_t last_write_counted = 0;
+
+  switch (overload) {
+  case OVERLOAD_GENERAL:
+    SET_TO_START_OF_HOUR(overload_stats.overload_general_time);
+    break;
+  case OVERLOAD_READ: {
+    stats_n_read_limit_reached++;
+    SET_TO_START_OF_HOUR(overload_stats.overload_ratelimits_time);
+    if (approx_time() >= last_read_counted + 60) { /* Count once a minute */
+        overload_stats.overload_read_count++;
+        last_read_counted = approx_time();
+    }
+    break;
+  }
+  case OVERLOAD_WRITE: {
+    stats_n_write_limit_reached++;
+    SET_TO_START_OF_HOUR(overload_stats.overload_ratelimits_time);
+    if (approx_time() >= last_write_counted + 60) { /* Count once a minute */
+      overload_stats.overload_write_count++;
+      last_write_counted = approx_time();
+    }
+    break;
+  }
+  case OVERLOAD_FD_EXHAUSTED:
+    SET_TO_START_OF_HOUR(overload_stats.overload_fd_exhausted_time);
+    overload_stats.overload_fd_exhausted++;
+    break;
+  }
+}
+
+/** Note down that we've reached a TCP port exhaustion. This triggers an
+ * overload general event. */
+void
+rep_hist_note_tcp_exhaustion(void)
+{
+  stats_n_tcp_exhaustion++;
+  rep_hist_note_overload(OVERLOAD_GENERAL);
+}
+
+/** Return the total number of TCP exhaustion times we've reached. */
+uint64_t
+rep_hist_get_n_tcp_exhaustion(void)
+{
+  return stats_n_tcp_exhaustion;
+}
 
 /** Return the or_history_t for the OR with identity digest <b>id</b>,
  * creating it if necessary. */
@@ -1652,6 +2001,7 @@ rep_hist_note_desc_served(const char * desc)
  * @{ */
 STATIC int onion_handshakes_requested[MAX_ONION_HANDSHAKE_TYPE+1] = {0};
 STATIC int onion_handshakes_assigned[MAX_ONION_HANDSHAKE_TYPE+1] = {0};
+STATIC uint64_t onion_handshakes_dropped[MAX_ONION_HANDSHAKE_TYPE+1] = {0};
 /**@}*/
 
 /** A new onionskin (using the <b>type</b> handshake) has arrived. */
@@ -1669,6 +2019,15 @@ rep_hist_note_circuit_handshake_assigned(uint16_t type)
 {
   if (type <= MAX_ONION_HANDSHAKE_TYPE)
     onion_handshakes_assigned[type]++;
+}
+
+/** We've just drop an onionskin (using the <b>type</b> handshake) due to being
+ * overloaded. */
+void
+rep_hist_note_circuit_handshake_dropped(uint16_t type)
+{
+  if (type <= MAX_ONION_HANDSHAKE_TYPE)
+    onion_handshakes_dropped[type]++;
 }
 
 /** Get the circuit handshake value that is requested. */
@@ -1689,6 +2048,16 @@ rep_hist_get_circuit_handshake_assigned, (uint16_t type))
     return 0;
   }
   return onion_handshakes_assigned[type];
+}
+
+/** Get the circuit handshake value that is dropped. */
+MOCK_IMPL(uint64_t,
+rep_hist_get_circuit_handshake_dropped, (uint16_t type))
+{
+  if (BUG(type > MAX_ONION_HANDSHAKE_TYPE)) {
+    return 0;
+  }
+  return onion_handshakes_dropped[type];
 }
 
 /** Log our onionskin statistics since the last time we were called. */
@@ -1722,7 +2091,6 @@ static hs_v2_stats_t *
 hs_v2_stats_new(void)
 {
   hs_v2_stats_t *new_hs_v2_stats = tor_malloc_zero(sizeof(hs_v2_stats_t));
-  new_hs_v2_stats->v2_onions_seen_this_period = digestmap_new();
 
   return new_hs_v2_stats;
 }
@@ -1737,8 +2105,6 @@ hs_v2_stats_free_(hs_v2_stats_t *victim_hs_v2_stats)
   if (!victim_hs_v2_stats) {
     return;
   }
-
-  digestmap_free(victim_hs_v2_stats->v2_onions_seen_this_period, NULL);
   tor_free(victim_hs_v2_stats);
 }
 
@@ -1753,38 +2119,7 @@ rep_hist_reset_hs_v2_stats(time_t now)
 
   hs_v2_stats->rp_v2_relay_cells_seen = 0;
 
-  digestmap_free(hs_v2_stats->v2_onions_seen_this_period, NULL);
-  hs_v2_stats->v2_onions_seen_this_period = digestmap_new();
-
   start_of_hs_v2_stats_interval = now;
-}
-
-/** As HSDirs, we saw another v2 onion with public key <b>pubkey</b>. Check
- *  whether we have counted it before, if not count it now! */
-void
-rep_hist_hsdir_stored_maybe_new_v2_onion(const crypto_pk_t *pubkey)
-{
-  char pubkey_hash[DIGEST_LEN];
-
-  if (!hs_v2_stats) {
-    return; // We're not collecting stats
-  }
-
-  /* Get the digest of the pubkey which will be used to detect whether
-     we've seen this hidden service before or not.  */
-  if (crypto_pk_get_digest(pubkey, pubkey_hash) < 0) {
-    /*  This fail should not happen; key has been validated by
-        descriptor parsing code first. */
-    return;
-  }
-
-  /* Check if this is the first time we've seen this hidden
-     service. If it is, count it as new. */
-  if (!digestmap_get(hs_v2_stats->v2_onions_seen_this_period,
-                     pubkey_hash)) {
-    digestmap_set(hs_v2_stats->v2_onions_seen_this_period,
-                  pubkey_hash, (void*)(uintptr_t)1);
-  }
 }
 
 /*** HSv3 stats ******/
@@ -1989,8 +2324,7 @@ rep_hist_format_hs_stats(time_t now, bool is_v3)
   uint64_t rp_cells_seen = is_v3 ?
     hs_v3_stats->rp_v3_relay_cells_seen : hs_v2_stats->rp_v2_relay_cells_seen;
   size_t onions_seen = is_v3 ?
-    digest256map_size(hs_v3_stats->v3_onions_seen_this_period) :
-    digestmap_size(hs_v2_stats->v2_onions_seen_this_period);
+    digest256map_size(hs_v3_stats->v3_onions_seen_this_period) : 0;
   time_t start_of_hs_stats_interval = is_v3 ?
     start_of_hs_v3_stats_interval : start_of_hs_v2_stats_interval;
 
